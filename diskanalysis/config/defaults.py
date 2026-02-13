@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 from diskanalysis.config.schema import AppConfig, PatternRule, Thresholds
-from diskanalysis.models.enums import InsightCategory, Severity
+from diskanalysis.models.enums import InsightCategory
 
 
 def _rule(
@@ -13,7 +13,6 @@ def _rule(
     category: InsightCategory,
     safe_to_delete: bool,
     recommendation: str,
-    severity: Severity = Severity.MEDIUM,
     apply_to: Literal["file", "dir", "both"] = "both",
     stop_recursion: bool = False,
 ) -> PatternRule:
@@ -23,7 +22,6 @@ def _rule(
         category=category,
         safe_to_delete=safe_to_delete,
         recommendation=recommendation,
-        severity=severity,
         apply_to=apply_to,
         stop_recursion=stop_recursion,
     )
@@ -39,7 +37,6 @@ def default_config() -> AppConfig:
             InsightCategory.TEMP,
             True,
             "rm -rf /tmp/<target>",
-            Severity.HIGH,
         ),
         _rule(
             "User Temp",
@@ -47,7 +44,6 @@ def default_config() -> AppConfig:
             InsightCategory.TEMP,
             True,
             "Clean temporary workspace files",
-            Severity.MEDIUM,
         ),
         _rule(
             "Log Files",
@@ -55,7 +51,6 @@ def default_config() -> AppConfig:
             InsightCategory.TEMP,
             True,
             "Archive or delete stale logs",
-            Severity.LOW,
             "file",
         ),
         _rule(
@@ -64,7 +59,6 @@ def default_config() -> AppConfig:
             InsightCategory.TEMP,
             True,
             "python -m compileall <project>",
-            Severity.MEDIUM,
         ),
         _rule(
             "Pytest Cache",
@@ -72,7 +66,6 @@ def default_config() -> AppConfig:
             InsightCategory.TEMP,
             True,
             "pytest --cache-clear",
-            Severity.LOW,
         ),
         _rule(
             "Mypy Cache",
@@ -80,7 +73,6 @@ def default_config() -> AppConfig:
             InsightCategory.TEMP,
             True,
             "mypy --cache-dir /tmp/mypy",
-            Severity.LOW,
         ),
         _rule(
             "Ruff Cache",
@@ -88,7 +80,6 @@ def default_config() -> AppConfig:
             InsightCategory.TEMP,
             True,
             "ruff clean",
-            Severity.LOW,
         ),
         _rule(
             "Coverage Files",
@@ -96,7 +87,6 @@ def default_config() -> AppConfig:
             InsightCategory.TEMP,
             True,
             "coverage erase",
-            Severity.LOW,
         ),
         _rule(
             "Editor Swaps",
@@ -104,7 +94,6 @@ def default_config() -> AppConfig:
             InsightCategory.TEMP,
             True,
             "Delete editor swap files",
-            Severity.LOW,
             "file",
         ),
         _rule(
@@ -113,7 +102,6 @@ def default_config() -> AppConfig:
             InsightCategory.TEMP,
             True,
             "find . -name .DS_Store -delete",
-            Severity.LOW,
             "file",
         ),
         _rule(
@@ -122,7 +110,6 @@ def default_config() -> AppConfig:
             InsightCategory.TEMP,
             True,
             "Delete npm debug logs",
-            Severity.LOW,
             "file",
         ),
         _rule(
@@ -131,7 +118,6 @@ def default_config() -> AppConfig:
             InsightCategory.TEMP,
             True,
             "Delete yarn error logs",
-            Severity.LOW,
             "file",
         ),
     ]
@@ -143,7 +129,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "npm cache clean --force",
-            Severity.MEDIUM,
         ),
         _rule(
             "Yarn Cache",
@@ -151,7 +136,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "yarn cache clean",
-            Severity.MEDIUM,
         ),
         _rule(
             "pnpm Store",
@@ -159,7 +143,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "pnpm store prune",
-            Severity.MEDIUM,
         ),
         _rule(
             "pip Cache",
@@ -167,7 +150,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "pip cache purge",
-            Severity.MEDIUM,
         ),
         _rule(
             "uv Cache",
@@ -175,7 +157,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "uv cache clean",
-            Severity.MEDIUM,
         ),
         _rule(
             "poetry Cache",
@@ -183,7 +164,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "poetry cache clear pypi --all",
-            Severity.MEDIUM,
         ),
         _rule(
             "conda Packages",
@@ -191,7 +171,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "conda clean --all",
-            Severity.MEDIUM,
         ),
         _rule(
             "NuGet Cache",
@@ -199,7 +178,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "dotnet nuget locals all --clear",
-            Severity.MEDIUM,
         ),
         _rule(
             "Gradle Cache",
@@ -207,7 +185,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "gradle --stop && rm -rf ~/.gradle/caches",
-            Severity.MEDIUM,
         ),
         _rule(
             "Maven Repo",
@@ -215,7 +192,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             False,
             "Review dependencies before deletion",
-            Severity.LOW,
         ),
         _rule(
             "Ivy Cache",
@@ -223,7 +199,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "rm -rf ~/.ivy2/cache",
-            Severity.LOW,
         ),
         _rule(
             "SBT Boot",
@@ -231,7 +206,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "rm -rf ~/.sbt/boot",
-            Severity.LOW,
         ),
         _rule(
             "Coursier Cache",
@@ -239,7 +213,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "cs cache --help",
-            Severity.LOW,
         ),
         _rule(
             "Cargo Registry",
@@ -247,7 +220,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "cargo cache -a",
-            Severity.LOW,
         ),
         _rule(
             "rustup Downloads",
@@ -255,7 +227,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "rustup self cleanup",
-            Severity.LOW,
         ),
         _rule(
             "Go Module Cache",
@@ -263,7 +234,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "go clean -modcache",
-            Severity.MEDIUM,
         ),
         _rule(
             "Composer Cache",
@@ -271,7 +241,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "composer clear-cache",
-            Severity.LOW,
         ),
         _rule(
             "Bundler Cache",
@@ -279,7 +248,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "bundle clean --force",
-            Severity.LOW,
         ),
         _rule(
             "Xcode DerivedData",
@@ -287,7 +255,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "Delete Xcode DerivedData",
-            Severity.MEDIUM,
         ),
         _rule(
             "iOS Simulator",
@@ -295,7 +262,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             False,
             "Remove unused simulators from Xcode",
-            Severity.MEDIUM,
         ),
         _rule(
             "Docker Layers",
@@ -303,7 +269,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             False,
             "docker system prune",
-            Severity.HIGH,
         ),
         _rule(
             "Kube Cache",
@@ -311,7 +276,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "Delete kube cache",
-            Severity.LOW,
         ),
         _rule(
             "Terraform Plugins",
@@ -319,7 +283,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "rm -rf .terraform && terraform init",
-            Severity.MEDIUM,
         ),
         _rule(
             "pre-commit Cache",
@@ -327,7 +290,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "pre-commit clean",
-            Severity.LOW,
         ),
         _rule(
             "HuggingFace Cache",
@@ -335,7 +297,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             False,
             "Review model cache before deleting",
-            Severity.MEDIUM,
         ),
         _rule(
             "Ollama Models",
@@ -343,7 +304,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             False,
             "ollama rm <model>",
-            Severity.MEDIUM,
         ),
         _rule(
             "Chrome Cache",
@@ -351,7 +311,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "Clear browser cache from settings",
-            Severity.LOW,
         ),
         _rule(
             "Firefox Cache",
@@ -359,7 +318,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "Clear Firefox cache",
-            Severity.LOW,
         ),
         _rule(
             "JetBrains Cache",
@@ -367,7 +325,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "Invalidate IDE caches",
-            Severity.LOW,
         ),
         _rule(
             "VSCode Cache",
@@ -375,7 +332,6 @@ def default_config() -> AppConfig:
             InsightCategory.CACHE,
             True,
             "Clear VSCode cache",
-            Severity.LOW,
         ),
     ]
 
@@ -386,7 +342,6 @@ def default_config() -> AppConfig:
             InsightCategory.BUILD_ARTIFACT,
             True,
             "npm install",
-            Severity.HIGH,
             stop_recursion=True,
         ),
         _rule(
@@ -395,7 +350,6 @@ def default_config() -> AppConfig:
             InsightCategory.BUILD_ARTIFACT,
             False,
             "Recreate with uv venv .venv",
-            Severity.MEDIUM,
             stop_recursion=True,
         ),
         _rule(
@@ -404,7 +358,6 @@ def default_config() -> AppConfig:
             InsightCategory.BUILD_ARTIFACT,
             False,
             "python -m venv venv",
-            Severity.MEDIUM,
             stop_recursion=True,
         ),
         _rule(
@@ -413,7 +366,6 @@ def default_config() -> AppConfig:
             InsightCategory.BUILD_ARTIFACT,
             True,
             "Re-run build command",
-            Severity.MEDIUM,
             stop_recursion=True,
         ),
         _rule(
@@ -422,7 +374,6 @@ def default_config() -> AppConfig:
             InsightCategory.BUILD_ARTIFACT,
             True,
             "Re-run package build",
-            Severity.MEDIUM,
             stop_recursion=True,
         ),
         _rule(
@@ -431,7 +382,6 @@ def default_config() -> AppConfig:
             InsightCategory.BUILD_ARTIFACT,
             True,
             "dotnet build",
-            Severity.MEDIUM,
             stop_recursion=True,
         ),
         _rule(
@@ -440,7 +390,6 @@ def default_config() -> AppConfig:
             InsightCategory.BUILD_ARTIFACT,
             True,
             "Rebuild binaries",
-            Severity.MEDIUM,
             stop_recursion=True,
         ),
         _rule(
@@ -449,7 +398,6 @@ def default_config() -> AppConfig:
             InsightCategory.BUILD_ARTIFACT,
             True,
             "cargo build",
-            Severity.HIGH,
             stop_recursion=True,
         ),
         _rule(
@@ -458,7 +406,6 @@ def default_config() -> AppConfig:
             InsightCategory.BUILD_ARTIFACT,
             True,
             "dotnet restore",
-            Severity.MEDIUM,
             stop_recursion=True,
         ),
         _rule(
@@ -467,7 +414,6 @@ def default_config() -> AppConfig:
             InsightCategory.BUILD_ARTIFACT,
             True,
             "Regenerated on run",
-            Severity.LOW,
             stop_recursion=True,
         ),
         _rule(
@@ -476,7 +422,6 @@ def default_config() -> AppConfig:
             InsightCategory.BUILD_ARTIFACT,
             True,
             "next build",
-            Severity.MEDIUM,
             stop_recursion=True,
         ),
         _rule(
@@ -485,7 +430,6 @@ def default_config() -> AppConfig:
             InsightCategory.BUILD_ARTIFACT,
             True,
             "nuxt build",
-            Severity.MEDIUM,
             stop_recursion=True,
         ),
         _rule(
@@ -494,7 +438,6 @@ def default_config() -> AppConfig:
             InsightCategory.BUILD_ARTIFACT,
             True,
             "Run tests again for coverage",
-            Severity.LOW,
             stop_recursion=True,
         ),
         _rule(
@@ -503,7 +446,6 @@ def default_config() -> AppConfig:
             InsightCategory.BUILD_ARTIFACT,
             True,
             "tox -r",
-            Severity.LOW,
             stop_recursion=True,
         ),
     ]
@@ -515,7 +457,6 @@ def default_config() -> AppConfig:
             InsightCategory.CUSTOM,
             False,
             "Archive files may be backup artifacts; verify before removing.",
-            Severity.LOW,
             apply_to="file",
         )
     ]

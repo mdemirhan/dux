@@ -27,14 +27,11 @@ def _top_consumers(root: ScanNode, top_n: int) -> list[ScanNode]:
     return items[:top_n]
 
 
-def _stats_panel(root: ScanNode, stats: ScanStats, bundle: InsightBundle) -> Panel:
+def _stats_panel(root: ScanNode, stats: ScanStats) -> Panel:
     body = (
         f"Files: [bold]{stats.files}[/bold]\n"
         f"Directories: [bold]{stats.directories}[/bold]\n"
         f"Total Size: [bold]{format_bytes(root.size_bytes)}[/bold]\n"
-        f"Insights: [bold]{len(bundle.insights)}[/bold]\n"
-        f"Reclaimable: [bold]{format_bytes(bundle.reclaimable_bytes)}[/bold]\n"
-        f"Safe to Delete: [bold]{format_bytes(bundle.safe_reclaimable_bytes)}[/bold]\n"
         f"Access Errors: [bold]{stats.access_errors}[/bold]"
     )
     return Panel(body, title="Scan Summary", border_style="blue")
@@ -47,7 +44,7 @@ def render_summary(
     bundle: InsightBundle,
     config: AppConfig,
 ) -> None:
-    console.print(_stats_panel(root, stats, bundle))
+    console.print(_stats_panel(root, stats))
 
     top_table = Table(title="Top Space Consumers", header_style="bold cyan")
     top_table.add_column("Path")
@@ -77,32 +74,17 @@ def render_summary(
         cat_table.add_row(category, str(count), format_bytes(total))
     console.print(cat_table)
 
-    quick_wins = [item for item in bundle.insights if item.safe_to_delete][
-        : config.top_n
-    ]
-    wins_table = Table(title="Quick Wins (Safe to Delete)", header_style="bold green")
-    wins_table.add_column("Path")
-    wins_table.add_column("Size", justify="right")
-    wins_table.add_column("Recommendation")
-
-    for item in quick_wins:
-        wins_table.add_row(
-            item.path, format_bytes(item.size_bytes), item.recommendation
-        )
-    console.print(wins_table)
-
 
 def render_focused_summary(
     console: Console,
     title: str,
     analyzed_total: int,
-    safe_total: int,
     insights: list[Insight],
     top_n: int,
 ) -> None:
     console.print(
         Panel(
-            f"Analyzed: [bold]{format_bytes(analyzed_total)}[/bold]\nSafe to Delete: [bold]{format_bytes(safe_total)}[/bold]",
+            f"Analyzed: [bold]{format_bytes(analyzed_total)}[/bold]",
             title=title,
         )
     )
@@ -111,15 +93,11 @@ def render_focused_summary(
     table.add_column("Path")
     table.add_column("Category")
     table.add_column("Size", justify="right")
-    table.add_column("Safe", justify="center")
-    table.add_column("Recommendation")
 
     for item in insights[:top_n]:
         table.add_row(
             item.path,
             item.category.value,
             format_bytes(item.size_bytes),
-            "yes" if item.safe_to_delete else "no",
-            item.recommendation,
         )
     console.print(table)

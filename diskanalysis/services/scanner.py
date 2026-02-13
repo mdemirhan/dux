@@ -68,7 +68,7 @@ def scan_path(
     options: ScanOptions,
     progress_callback: ProgressCallback | None = None,
     cancel_check: CancelCheck | None = None,
-    workers: int = 4,
+    workers: int = 8,
 ) -> ScanResult:
     root_path = Path(path).expanduser()
     if not root_path.exists():

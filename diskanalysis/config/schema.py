@@ -3,25 +3,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from diskanalysis.models.enums import InsightCategory, Severity
+from diskanalysis.models.enums import InsightCategory
 
 
 @dataclass(slots=True)
 class Thresholds:
     large_file_mb: int = 512
     large_dir_mb: int = 2048
-    old_file_days: int = 365
-    min_insight_mb: int = 50
     large_file_bytes: int = field(init=False)
     large_dir_bytes: int = field(init=False)
-    old_file_seconds: int = field(init=False)
-    min_insight_bytes: int = field(init=False)
 
     def __post_init__(self) -> None:
         self.large_file_bytes = self.large_file_mb * 1024 * 1024
         self.large_dir_bytes = self.large_dir_mb * 1024 * 1024
-        self.old_file_seconds = self.old_file_days * 24 * 60 * 60
-        self.min_insight_bytes = self.min_insight_mb * 1024 * 1024
 
 
 @dataclass(slots=True)
@@ -31,7 +25,6 @@ class PatternRule:
     category: InsightCategory
     safe_to_delete: bool
     recommendation: str
-    severity: Severity = Severity.MEDIUM
     apply_to: Literal["file", "dir", "both"] = "both"
     stop_recursion: bool = False
 
@@ -56,8 +49,6 @@ class AppConfig:
             "thresholds": {
                 "largeFileMb": self.thresholds.large_file_mb,
                 "largeDirMb": self.thresholds.large_dir_mb,
-                "oldFileDays": self.thresholds.old_file_days,
-                "minInsightMb": self.thresholds.min_insight_mb,
             },
             "excludePaths": self.exclude_paths,
             "additionalTempPaths": self.additional_temp_paths,
@@ -82,7 +73,6 @@ def _rule_to_dict(rule: PatternRule) -> dict[str, Any]:
         "category": rule.category.value,
         "safeToDelete": rule.safe_to_delete,
         "recommendation": rule.recommendation,
-        "severity": rule.severity.value,
         "applyTo": rule.apply_to,
         "stopRecursion": rule.stop_recursion,
     }
@@ -105,7 +95,6 @@ def _rule_from_dict(payload: dict[str, Any]) -> PatternRule:
         category=InsightCategory(str(payload["category"])),
         safe_to_delete=bool(payload.get("safeToDelete", False)),
         recommendation=str(payload.get("recommendation", "Review before deleting.")),
-        severity=Severity(str(payload.get("severity", Severity.MEDIUM.value))),
         apply_to=_parse_apply_to(payload.get("applyTo", "both")),
         stop_recursion=bool(payload.get("stopRecursion", False)),
     )
@@ -119,12 +108,6 @@ def from_dict(data: dict[str, Any], defaults: AppConfig) -> AppConfig:
         ),
         large_dir_mb=int(
             thresholds.get("largeDirMb", defaults.thresholds.large_dir_mb)
-        ),
-        old_file_days=int(
-            thresholds.get("oldFileDays", defaults.thresholds.old_file_days)
-        ),
-        min_insight_mb=int(
-            thresholds.get("minInsightMb", defaults.thresholds.min_insight_mb)
         ),
     )
 

@@ -13,13 +13,5 @@ class InsightCategory(str, Enum):
     CACHE = "cache"
     LARGE_FILE = "large_file"
     LARGE_DIRECTORY = "large_directory"
-    OLD_FILE = "old_file"
     BUILD_ARTIFACT = "build_artifact"
     CUSTOM = "custom"
-
-
-class Severity(str, Enum):
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-    INFO = "info"

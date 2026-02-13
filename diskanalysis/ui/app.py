@@ -17,14 +17,21 @@ from diskanalysis.models.scan import ScanNode, ScanStats
 from diskanalysis.services.formatting import format_bytes, format_ts, relative_bar
 
 
-TABS = ["overview", "browse", "insights", "temp", "cache"]
+TABS = ["overview", "browse", "temp", "large_dir", "large_file"]
+
+_TAB_LABELS: dict[str, str] = {
+    "overview": "Overview",
+    "browse": "Browse",
+    "temp": "Temp",
+    "large_dir": "Large Dir",
+    "large_file": "Large File",
+}
 
 _CATEGORY_LABELS: dict[str, str] = {
     "temp": "Temp",
     "cache": "Cache",
     "large_file": "Large File",
     "large_directory": "Large Dir",
-    "old_file": "Old File",
     "build_artifact": "Build Artifact",
     "custom": "Custom",
 }
@@ -65,7 +72,7 @@ class HelpOverlay(ModalScreen[None]):
                 "",
                 "[b #81a2be]Views[/]",
                 "  Tab / Shift+Tab: Next/Previous view",
-                "  o / b / i / t / c: Jump to view",
+                "  o / b / t / d / f: Jump to view",
                 "",
                 "[b #81a2be]Browse[/]",
                 "  h / Left: Collapse or parent",
@@ -149,7 +156,6 @@ class DiskAnalyzerApp(App[None]):
             Static("─" * 200, id="separator-top"),
             DataTable(id="content-table"),
             Static("─" * 200, id="separator-bottom"),
-            Static(id="info-row"),
             Static(id="status-row"),
             id="app-grid",
         )
@@ -182,7 +188,7 @@ class DiskAnalyzerApp(App[None]):
 
         tab_items: list[str] = []
         for tab in TABS:
-            label = tab.capitalize()
+            label = _TAB_LABELS.get(tab, tab)
             if tab == self.current_view:
                 tab_items.append(f"[bold #1d1f21 on #b5bd68] {label} [/] ")
             else:
@@ -193,17 +199,25 @@ class DiskAnalyzerApp(App[None]):
 
     def _render_content_table(self) -> None:
         table = self.query_one("#content-table", DataTable)
-        right_header = "MODIFIED" if self.current_view == "browse" else "CATEGORY"
         table.clear(columns=True)
 
         size_w = 12
         bar_w = 20
-        right_w = 16
-        name_w = max(20, self.size.width - size_w - bar_w - right_w - 16)
-        table.add_column("NAME", width=name_w)
-        table.add_column("SIZE", width=size_w)
-        table.add_column("BAR", width=bar_w)
-        table.add_column(right_header, width=right_w)
+
+        has_right_col = self.current_view in {"browse", "temp"}
+        if has_right_col:
+            right_header = "MODIFIED" if self.current_view == "browse" else "CATEGORY"
+            right_w = 16
+            name_w = max(20, self.size.width - size_w - bar_w - right_w - 16)
+            table.add_column("NAME", width=name_w)
+            table.add_column("SIZE", width=size_w)
+            table.add_column("BAR", width=bar_w)
+            table.add_column(right_header, width=right_w)
+        else:
+            name_w = max(20, self.size.width - size_w - bar_w - 12)
+            table.add_column("NAME", width=name_w)
+            table.add_column("SIZE", width=size_w)
+            table.add_column("BAR", width=bar_w)
 
         self.rows = self._build_rows_for_current_view()
         if not self.rows:
@@ -218,12 +232,19 @@ class DiskAnalyzerApp(App[None]):
             else self.root.size_bytes,
         )
         for row in self.rows:
-            table.add_row(
-                row.name,
-                format_bytes(row.size_bytes),
-                relative_bar(row.size_bytes, total, 18),
-                row.right,
+            size_text = format_bytes(row.size_bytes) if row.size_bytes > 0 else ""
+            bar_text = (
+                relative_bar(row.size_bytes, total, 18) if row.size_bytes > 0 else ""
             )
+            if row.path == "separator":
+                if has_right_col:
+                    table.add_row("─" * 40, "", "", "")
+                else:
+                    table.add_row("─" * 40, "", "")
+            elif has_right_col:
+                table.add_row(row.name, size_text, bar_text, row.right)
+            else:
+                table.add_row(row.name, size_text, bar_text)
 
         self.selected_index = max(0, min(self.selected_index, len(self.rows) - 1))
         table.move_cursor(row=self.selected_index, animate=False)
@@ -231,19 +252,14 @@ class DiskAnalyzerApp(App[None]):
     def _render_footer_rows(self) -> None:
         total_rows = len(self.rows)
         cursor = min(total_rows, self.selected_index + 1)
-        info = (
-            f"Safe to delete: {format_bytes(self.bundle.safe_reclaimable_bytes)}"
-            + f"    Reclaimable: {format_bytes(self.bundle.reclaimable_bytes)}"
-            + f"    Row {cursor}/{total_rows}"
-        )
-        self.query_one("#info-row", Static).update(
-            Text.from_markup(f"[#b5bd68]{info}[/]")
-        )
 
         if self.search_mode:
             status = f"SEARCH: /{self.search_query}  (Enter: keep, Esc: clear)"
         else:
-            status = "q quit | ? help | Tab views | / search | n/N next/prev | j/k move"
+            status = (
+                f"Row {cursor}/{total_rows}    "
+                "q quit | ? help | Tab views | / search | n/N next/prev | j/k move"
+            )
             if self.current_view == "browse":
                 status += (
                     " | h/l collapse-expand | Enter drill-in | Backspace drill-out"
@@ -261,73 +277,101 @@ class DiskAnalyzerApp(App[None]):
             rows = self._overview_rows()
         elif self.current_view == "browse":
             rows = self._browse_rows()
-        elif self.current_view == "insights":
-            rows = self._insight_rows(lambda _: True)
         elif self.current_view == "temp":
             rows = self._insight_rows(
                 lambda i: (
-                    i.category in {InsightCategory.TEMP, InsightCategory.BUILD_ARTIFACT}
+                    i.category
+                    in {
+                        InsightCategory.TEMP,
+                        InsightCategory.CACHE,
+                        InsightCategory.BUILD_ARTIFACT,
+                    }
                 )
             )
+        elif self.current_view == "large_dir":
+            rows = self._insight_rows(
+                lambda i: i.category is InsightCategory.LARGE_DIRECTORY
+            )
         else:
-            rows = self._insight_rows(lambda i: i.category is InsightCategory.CACHE)
+            rows = self._insight_rows(
+                lambda i: i.category is InsightCategory.LARGE_FILE
+            )
 
         self._rows_cache[self.current_view] = rows
         return rows
 
+    def _category_size(self, *categories: InsightCategory) -> int:
+        cats = set(categories)
+        return sum(
+            item.size_bytes for item in self.bundle.insights if item.category in cats
+        )
+
     def _overview_rows(self) -> list[DisplayRow]:
+        temp_size = self._category_size(InsightCategory.TEMP)
+        cache_size = self._category_size(InsightCategory.CACHE)
+        build_size = self._category_size(InsightCategory.BUILD_ARTIFACT)
+
         rows: list[DisplayRow] = [
             DisplayRow(
                 path="stats.total",
                 name=f"Total Size: {format_bytes(self.root.size_bytes)}",
                 size_bytes=self.root.size_bytes,
-                right="STAT",
+                right="",
             ),
             DisplayRow(
                 path="stats.files",
-                name=f"Files: {self.stats.files}",
+                name=f"Files: {self.stats.files:,}",
                 size_bytes=0,
-                right="STAT",
+                right="",
             ),
             DisplayRow(
                 path="stats.dirs",
-                name=f"Directories: {self.stats.directories}",
+                name=f"Directories: {self.stats.directories:,}",
                 size_bytes=0,
-                right="STAT",
+                right="",
             ),
             DisplayRow(
-                path="stats.insights",
-                name=f"Insights: {len(self.bundle.insights)}",
+                path="stats.temp",
+                name=f"Temp: {format_bytes(temp_size)}",
+                size_bytes=temp_size,
+                right="",
+            ),
+            DisplayRow(
+                path="stats.cache",
+                name=f"Cache: {format_bytes(cache_size)}",
+                size_bytes=cache_size,
+                right="",
+            ),
+            DisplayRow(
+                path="stats.build",
+                name=f"Build Artifacts: {format_bytes(build_size)}",
+                size_bytes=build_size,
+                right="",
+            ),
+            DisplayRow(
+                path="separator",
+                name="",
                 size_bytes=0,
-                right="STAT",
-            ),
-            DisplayRow(
-                path="stats.safe",
-                name=f"Safe to delete: {format_bytes(self.bundle.safe_reclaimable_bytes)}",
-                size_bytes=self.bundle.safe_reclaimable_bytes,
-                right="STAT",
-            ),
-            DisplayRow(
-                path="stats.reclaim",
-                name=f"Reclaimable: {format_bytes(self.bundle.reclaimable_bytes)}",
-                size_bytes=self.bundle.reclaimable_bytes,
-                right="STAT",
+                right="",
             ),
         ]
 
-        top_items = sorted(
-            self.node_by_path.values(), key=lambda x: x.size_bytes, reverse=True
-        )
-        for node in [item for item in top_items if item.path != self.root.path][
-            : self.config.top_n
-        ]:
-            typ = "DIR" if node.kind is NodeKind.DIRECTORY else "FILE"
+        top_dirs = sorted(
+            (
+                n
+                for n in self.node_by_path.values()
+                if n.is_dir and n.path != self.root.path
+            ),
+            key=lambda x: x.size_bytes,
+            reverse=True,
+        )[:20]
+        for node in top_dirs:
             rows.append(
                 DisplayRow(
                     path=node.path,
-                    name=f"{node.name}",
+                    name=node.name,
                     size_bytes=node.size_bytes,
-                    right=typ,
+                    right="",
                 )
             )
         return rows
@@ -591,13 +635,13 @@ class DiskAnalyzerApp(App[None]):
         if key in {"shift+tab", "backtab"}:
             self._set_view(TABS[(TABS.index(self.current_view) - 1) % len(TABS)])
             return True
-        if key in {"o", "b", "i", "t", "c"}:
+        if key in {"o", "b", "t", "d", "f"}:
             mapping = {
                 "o": "overview",
                 "b": "browse",
-                "i": "insights",
                 "t": "temp",
-                "c": "cache",
+                "d": "large_dir",
+                "f": "large_file",
             }
             self._set_view(mapping[key])
             return True

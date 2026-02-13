@@ -5,8 +5,8 @@ Screen {
 
 #app-grid {
     layout: grid;
-    grid-size: 1 7;
-    grid-rows: 1 1 1 1fr 1 1 1;
+    grid-size: 1 6;
+    grid-rows: 1 1 1 1fr 1 1;
     height: 100%;
     padding: 0 1;
 }
@@ -53,12 +53,6 @@ DataTable > .datatable--odd-row {
 
 DataTable > .datatable--even-row {
     background: #202226;
-}
-
-#info-row {
-    background: #282a2e;
-    color: #b5bd68;
-    padding: 0 1;
 }
 
 #status-row {

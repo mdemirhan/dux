@@ -182,23 +182,19 @@ def run(
             focused = filter_insights(
                 bundle, {InsightCategory.TEMP, InsightCategory.BUILD_ARTIFACT}
             )
-            safe_total = sum(item.size_bytes for item in focused if item.safe_to_delete)
             render_focused_summary(
                 console,
                 "Temp / Build Summary",
                 snapshot.root.size_bytes,
-                safe_total,
                 focused,
                 config.top_n,
             )
         elif cache:
             focused = filter_insights(bundle, {InsightCategory.CACHE})
-            safe_total = sum(item.size_bytes for item in focused if item.safe_to_delete)
             render_focused_summary(
                 console,
                 "Cache Summary",
                 snapshot.root.size_bytes,
-                safe_total,
                 focused,
                 config.top_n,
             )
@@ -207,10 +203,8 @@ def run(
         raise typer.Exit(0)
 
     initial_view = "overview"
-    if temp:
+    if temp or cache:
         initial_view = "temp"
-    elif cache:
-        initial_view = "cache"
 
     tui = DiskAnalyzerApp(
         root=snapshot.root,

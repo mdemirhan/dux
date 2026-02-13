@@ -4,7 +4,7 @@ import time
 
 from diskanalysis.config.defaults import default_config
 from diskanalysis.config.schema import PatternRule, Thresholds
-from diskanalysis.models.enums import InsightCategory, NodeKind, Severity
+from diskanalysis.models.enums import InsightCategory, NodeKind
 from diskanalysis.models.scan import ScanNode
 from diskanalysis.services.insights import generate_insights
 
@@ -45,7 +45,6 @@ def _dir(path: str, size: int, *children: ScanNode) -> ScanNode:
 
 def test_temp_analyzer_path_matching_and_threshold_logic() -> None:
     config = default_config()
-    config.thresholds = Thresholds(min_insight_mb=1)
     node = _file("/root/tmp/trace.log", size=2 * 1024 * 1024)
     bundle = generate_insights(_tree_with(node), config)
 
@@ -54,7 +53,6 @@ def test_temp_analyzer_path_matching_and_threshold_logic() -> None:
 
 def test_cache_analyzer_path_matching_and_threshold_logic() -> None:
     config = default_config()
-    config.thresholds = Thresholds(min_insight_mb=1)
     node = _dir("/root/.cache/pip", size=3 * 1024 * 1024)
     bundle = generate_insights(_tree_with(node), config)
 
@@ -63,9 +61,7 @@ def test_cache_analyzer_path_matching_and_threshold_logic() -> None:
 
 def test_large_file_detection() -> None:
     config = default_config()
-    config.thresholds = Thresholds(
-        large_file_mb=1, large_dir_mb=2048, old_file_days=365, min_insight_mb=0
-    )
+    config.thresholds = Thresholds(large_file_mb=1, large_dir_mb=2048)
     node = _file("/root/huge.dump", size=2 * 1024 * 1024)
     bundle = generate_insights(_tree_with(node), config)
 
@@ -74,7 +70,6 @@ def test_large_file_detection() -> None:
 
 def test_build_artifact_detection() -> None:
     config = default_config()
-    config.thresholds = Thresholds(min_insight_mb=1)
     node = _dir(
         "/root/project/node_modules",
         2 * 1024 * 1024,
@@ -89,7 +84,6 @@ def test_build_artifact_detection() -> None:
 
 def test_dedup_by_path() -> None:
     config = default_config()
-    config.thresholds = Thresholds(min_insight_mb=0)
     node = _dir("/root/__pycache__", size=100)
     bundle = generate_insights(_tree_with(node), config)
 
@@ -97,32 +91,19 @@ def test_dedup_by_path() -> None:
     assert len(matched) == 1
 
 
-def test_reclaimable_space_calculation() -> None:
+def test_temp_and_cache_insights_generated() -> None:
     config = default_config()
-    config.thresholds = Thresholds(min_insight_mb=0)
     temp = _dir("/root/tmp/cache", size=100)
     cache = _dir("/root/.cache/pip", size=200)
     bundle = generate_insights(_tree_with(temp, cache), config)
 
-    assert bundle.reclaimable_bytes >= 300
-    assert bundle.safe_reclaimable_bytes > 0
-
-
-def test_old_file_detection() -> None:
-    config = default_config()
-    config.thresholds = Thresholds(
-        large_file_mb=1024, large_dir_mb=2048, old_file_days=10, min_insight_mb=0
-    )
-    old_ts = time.time() - (20 * 24 * 60 * 60)
-    node = _file("/root/old.txt", size=100, modified=old_ts)
-    bundle = generate_insights(_tree_with(node), config)
-
-    assert any(item.category is InsightCategory.OLD_FILE for item in bundle.insights)
+    categories = {item.category for item in bundle.insights}
+    assert InsightCategory.TEMP in categories
+    assert InsightCategory.CACHE in categories
 
 
 def test_custom_pattern_detection() -> None:
     config = default_config()
-    config.thresholds = Thresholds(min_insight_mb=0)
     config.custom_patterns = [
         PatternRule(
             name="ISO",
@@ -130,7 +111,6 @@ def test_custom_pattern_detection() -> None:
             category=InsightCategory.CUSTOM,
             safe_to_delete=False,
             recommendation="Review archives",
-            severity=Severity.LOW,
             apply_to="file",
             stop_recursion=False,
         )
