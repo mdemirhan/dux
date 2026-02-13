@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable, override
 
 from rich.text import Text
@@ -19,6 +18,16 @@ from diskanalysis.services.formatting import format_bytes, format_ts, relative_b
 
 
 TABS = ["overview", "browse", "insights", "temp", "cache"]
+
+_CATEGORY_LABELS: dict[str, str] = {
+    "temp": "Temp",
+    "cache": "Cache",
+    "large_file": "Large File",
+    "large_directory": "Large Dir",
+    "old_file": "Old File",
+    "build_artifact": "Build Artifact",
+    "custom": "Custom",
+}
 
 
 @dataclass(slots=True)
@@ -135,10 +144,8 @@ class DiskAnalyzerApp(App[None]):
     @override
     def compose(self) -> ComposeResult:
         yield Container(
-            Static(id="header-row"),
             Static(id="path-row"),
             Static(id="tabs-row"),
-            Static(id="breadcrumb-row"),
             Static("─" * 200, id="separator-top"),
             DataTable(id="content-table"),
             Static("─" * 200, id="separator-bottom"),
@@ -154,6 +161,9 @@ class DiskAnalyzerApp(App[None]):
         table.focus()
         self._refresh_all()
 
+    def on_resize(self) -> None:
+        self._refresh_all()
+
     def _refresh_all(self) -> None:
         self._render_header_rows()
         self._render_content_table()
@@ -166,14 +176,6 @@ class DiskAnalyzerApp(App[None]):
         self._invalidate_rows("browse")
 
     def _render_header_rows(self) -> None:
-        self.query_one("#header-row", Static).update(
-            Text.from_markup(
-                (
-                    "[bold #8abeb7]DiskAnalysis[/]  [#969896]Terminal Disk Intelligence[/]"
-                    f"    [bold #f0c674]Total:[/] [bold #de935f]{format_bytes(self.root.size_bytes)}[/]"
-                )
-            )
-        )
         self.query_one("#path-row", Static).update(
             Text.from_markup(f"[#81a2be]Path:[/] {self.root.path}")
         )
@@ -189,30 +191,19 @@ class DiskAnalyzerApp(App[None]):
             Text.from_markup(" ".join(tab_items))
         )
 
-        if self.current_view == "browse":
-            rel = (
-                Path(self.browse_root_path).relative_to(Path(self.root.path))
-                if self.browse_root_path != self.root.path
-                else Path(".")
-            )
-            depth = 0 if str(rel) == "." else len(rel.parts)
-            crumbs = [part for part in rel.parts if part not in {"."}]
-            crumb_text = " / ".join(crumbs) if crumbs else "/"
-            self.query_one("#breadcrumb-row", Static).update(
-                Text.from_markup(
-                    f"[#8abeb7]Browse:[/] {crumb_text}    [#969896]Depth {depth}[/]"
-                )
-            )
-        else:
-            self.query_one("#breadcrumb-row", Static).update(
-                Text.from_markup(f"[#8abeb7]View:[/] {self.current_view.capitalize()}")
-            )
-
     def _render_content_table(self) -> None:
         table = self.query_one("#content-table", DataTable)
         right_header = "MODIFIED" if self.current_view == "browse" else "CATEGORY"
         table.clear(columns=True)
-        table.add_columns("NAME", "SIZE", "BAR", right_header)
+
+        size_w = 12
+        bar_w = 20
+        right_w = 16
+        name_w = max(20, self.size.width - size_w - bar_w - right_w - 16)
+        table.add_column("NAME", width=name_w)
+        table.add_column("SIZE", width=size_w)
+        table.add_column("BAR", width=bar_w)
+        table.add_column(right_header, width=right_w)
 
         self.rows = self._build_rows_for_current_view()
         if not self.rows:
@@ -286,6 +277,12 @@ class DiskAnalyzerApp(App[None]):
 
     def _overview_rows(self) -> list[DisplayRow]:
         rows: list[DisplayRow] = [
+            DisplayRow(
+                path="stats.total",
+                name=f"Total Size: {format_bytes(self.root.size_bytes)}",
+                size_bytes=self.root.size_bytes,
+                right="STAT",
+            ),
             DisplayRow(
                 path="stats.files",
                 name=f"Files: {self.stats.files}",
@@ -361,13 +358,20 @@ class DiskAnalyzerApp(App[None]):
 
     def _insight_rows(self, predicate: Callable[[Insight], bool]) -> list[DisplayRow]:
         rows: list[DisplayRow] = []
+        root_prefix = self.root.path.rstrip("/") + "/"
         for item in [x for x in self.bundle.insights if predicate(x)]:
+            display_path = (
+                item.path[len(root_prefix) :]
+                if item.path.startswith(root_prefix)
+                else item.path
+            )
+            label = _CATEGORY_LABELS.get(item.category.value, item.category.value)
             rows.append(
                 DisplayRow(
                     path=item.path,
-                    name=item.path,
+                    name=display_path,
                     size_bytes=item.size_bytes,
-                    right=item.category.value,
+                    right=label,
                 )
             )
         return rows
