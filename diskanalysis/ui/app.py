@@ -19,7 +19,7 @@ from diskanalysis.services.formatting import format_bytes, format_ts, relative_b
 from diskanalysis.services.insights import MAX_INSIGHTS_PER_CATEGORY
 
 
-TABS = ["overview", "browse", "temp", "large_dir", "large_file"]
+TABS = ["overview", "browse", "large_dir", "large_file", "temp"]
 
 _TAB_LABELS: dict[str, str] = {
     "overview": "Overview",
@@ -47,6 +47,7 @@ class DisplayRow:
     name: str
     size_bytes: int
     right: str
+    type_label: str = ""
 
 
 class HelpOverlay(ModalScreen[None]):
@@ -85,7 +86,7 @@ class HelpOverlay(ModalScreen[None]):
                 "  Backspace: Drill out",
                 "  Space: Toggle expand/collapse",
                 "",
-                "[b #81a2be]Temp Pagination[/]",
+                "[b #81a2be]Pagination[/]",
                 "  [ / ]: Previous/Next page",
                 "",
                 "[b #81a2be]Other[/]",
@@ -135,6 +136,7 @@ class DiskAnalyzerApp(App[None]):
         self.pending_g = False
         self._rows_cache: dict[str, list[DisplayRow]] = {}
         self._view_shown_counts: dict[str, int] = {}
+        self._view_total_counts: dict[str, int] = {}
         self._temp_page_index = 0
         self._temp_total_rows = 0
         self._temp_all_rows_cache: list[DisplayRow] | None = None
@@ -209,16 +211,21 @@ class DiskAnalyzerApp(App[None]):
 
         size_w = 12
         bar_w = 20
+        type_w = 8
+        right_w = 16
 
-        has_right_col = self.current_view in {"browse", "temp"}
-        if has_right_col:
-            right_header = "MODIFIED" if self.current_view == "browse" else "CATEGORY"
-            right_w = 16
+        if self.current_view == "temp":
+            name_w = max(20, self.size.width - size_w - type_w - right_w - 16)
+            table.add_column("NAME", width=name_w)
+            table.add_column("SIZE", width=size_w)
+            table.add_column("TYPE", width=type_w)
+            table.add_column("CATEGORY", width=right_w)
+        elif self.current_view == "browse":
             name_w = max(20, self.size.width - size_w - bar_w - right_w - 16)
             table.add_column("NAME", width=name_w)
             table.add_column("SIZE", width=size_w)
             table.add_column("BAR", width=bar_w)
-            table.add_column(right_header, width=right_w)
+            table.add_column("MODIFIED", width=right_w)
         else:
             name_w = max(20, self.size.width - size_w - bar_w - 12)
             table.add_column("NAME", width=name_w)
@@ -237,17 +244,23 @@ class DiskAnalyzerApp(App[None]):
             if self.current_view == "browse"
             else self.root.size_bytes,
         )
+        is_temp = self.current_view == "temp"
+        is_browse = self.current_view == "browse"
         for row in self.rows:
             size_text = format_bytes(row.size_bytes) if row.size_bytes > 0 else ""
             bar_text = (
                 relative_bar(row.size_bytes, total, 18) if row.size_bytes > 0 else ""
             )
             if row.path == "separator":
-                if has_right_col:
+                if is_temp:
+                    table.add_row("─" * 40, "", "", "")
+                elif is_browse:
                     table.add_row("─" * 40, "", "", "")
                 else:
                     table.add_row("─" * 40, "", "")
-            elif has_right_col:
+            elif is_temp:
+                table.add_row(row.name, size_text, row.type_label, row.right)
+            elif is_browse:
                 table.add_row(row.name, size_text, bar_text, row.right)
             else:
                 table.add_row(row.name, size_text, bar_text)
@@ -259,19 +272,33 @@ class DiskAnalyzerApp(App[None]):
         total_rows = len(self.rows)
         cursor = min(total_rows, self.selected_index + 1)
 
-        status = f"Row {cursor}/{total_rows}    q quit | ? help | Tab views | j/k move"
-        if self.current_view == "browse":
-            status += " | h/l collapse-expand | Enter drill-in | Backspace drill-out"
+        left = f"Row {cursor}/{total_rows}"
         if self.current_view == "temp":
             total_pages = max(
                 1, (self._temp_total_rows + TEMP_PAGE_SIZE - 1) // TEMP_PAGE_SIZE
             )
-            status += (
-                f" | \\[ prev | ] next | Page {self._temp_page_index + 1}/{total_pages}"
-            )
+            left += f" | Page {self._temp_page_index + 1}/{total_pages}"
         trimmed_text = self._trimmed_indicator(self.current_view)
         if trimmed_text:
-            status += f" | {trimmed_text}"
+            left += f" | {trimmed_text}"
+
+        hints = "q quit | ? help | Tab views | j/k move"
+        if self.current_view == "browse":
+            hints += " | h/l collapse-expand | Enter drill-in | Backspace drill-out"
+        if self.current_view == "temp":
+            hints += " | \\[ prev | ] next"
+
+        width = self.size.width
+        gap = 4
+        max_hints_len = width - len(left) - gap
+        if max_hints_len < 10:
+            status = left
+        else:
+            if len(hints) > max_hints_len:
+                hints = hints[: max_hints_len - 1] + "…"
+            pad = width - len(left) - len(hints)
+            status = left + " " * max(gap, pad) + hints
+
         self.query_one("#status-row", Static).update(
             Text.from_markup(f"[#969896]{status}[/]")
         )
@@ -368,7 +395,16 @@ class DiskAnalyzerApp(App[None]):
         if not categories:
             return ""
 
-        total = sum(self.bundle.category_counts.get(cat, 0) for cat in categories)
+        cat_set = set(categories)
+
+        total = self._view_total_counts.get(view)
+        if total is None:
+            total = len(
+                set().union(
+                    *(self.bundle.category_paths.get(cat, set()) for cat in cat_set)
+                )
+            )
+            self._view_total_counts[view] = total
         if total == 0:
             return ""
 
@@ -376,16 +412,17 @@ class DiskAnalyzerApp(App[None]):
             self.bundle.category_counts.get(cat, 0) > MAX_INSIGHTS_PER_CATEGORY
             for cat in categories
         )
-        if not trimmed:
-            return ""
 
         shown = self._view_shown_counts.get(view)
         if shown is None:
             shown = len(
-                [item for item in self.bundle.insights if item.category in categories]
+                [item for item in self.bundle.insights if item.category in cat_set]
             )
             self._view_shown_counts[view] = shown
-        return f"Showing {shown:,} of {total:,} results"
+
+        if trimmed:
+            return f"Showing {shown:,} of {total:,} results"
+        return f"Showing {shown:,} results"
 
     def _category_size(self, *categories: InsightCategory) -> int:
         return sum(self.bundle.category_sizes.get(cat, 0) for cat in categories)
@@ -434,14 +471,14 @@ class DiskAnalyzerApp(App[None]):
             ),
             DisplayRow(
                 path="separator",
-                name="",
+                name="── Largest 50 folders ──",
                 size_bytes=0,
                 right="",
             ),
         ]
 
         top_dirs = heapq.nlargest(
-            20,
+            50,
             (
                 n
                 for n in self.node_by_path.values()
@@ -449,11 +486,17 @@ class DiskAnalyzerApp(App[None]):
             ),
             key=lambda x: x.size_bytes,
         )
+        root_prefix = self.root.path.rstrip("/") + "/"
         for node in top_dirs:
+            display_path = (
+                node.path[len(root_prefix) :]
+                if node.path.startswith(root_prefix)
+                else node.path
+            )
             rows.append(
                 DisplayRow(
                     path=node.path,
-                    name=node.name,
+                    name=display_path,
                     size_bytes=node.size_bytes,
                     right="",
                 )
@@ -494,12 +537,15 @@ class DiskAnalyzerApp(App[None]):
                 else item.path
             )
             label = _CATEGORY_LABELS.get(item.category.value, item.category.value)
+            node = self.node_by_path.get(item.path)
+            type_label = "Folder" if node is not None and node.is_dir else "File"
             rows.append(
                 DisplayRow(
                     path=item.path,
                     name=display_path,
                     size_bytes=item.size_bytes,
                     right=label,
+                    type_label=type_label,
                 )
             )
         return rows

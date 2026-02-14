@@ -21,3 +21,4 @@ class InsightBundle:
     insights: list[Insight]
     category_counts: dict[InsightCategory, int] = field(default_factory=dict)
     category_sizes: dict[InsightCategory, int] = field(default_factory=dict)
+    category_paths: dict[InsightCategory, set[str]] = field(default_factory=dict)
