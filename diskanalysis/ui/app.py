@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from dataclasses import dataclass
 from typing import Callable, override
 
@@ -105,6 +107,7 @@ class HelpOverlay(ModalScreen[None]):
                 "  [ / ]: Previous/Next page",
                 "",
                 "[b #81a2be]Other[/]",
+                "  y: Yank (copy path/row to clipboard)",
                 "  ?: Toggle help",
                 "  q / Ctrl+C: Quit",
             ]
@@ -301,13 +304,14 @@ class DiskAnalyzerApp(App[None]):
         if trimmed_text:
             left += f" | {trimmed_text}"
 
-        hints = "q quit | ? help | Tab views | j/k move"
+        hints = "q quit | ? help | Tab views | y yank"
         if self.current_view == "browse":
-            hints += " | h/l collapse-expand | Enter drill-in | Backspace drill-out"
+            hints += " | h/l collapse/expand | Enter/Backspace drill-in/out"
         if paged_total > self._page_size:
-            hints += " | \\[ prev | ] next"
+            hints += " | \\[/] prev/next page"
 
-        width = self.size.width
+        # Account for horizontal padding: #app-grid (0 1) + #status-row (0 1)
+        width = self.size.width - 4
         gap = 4
         max_hints_len = width - len(left) - gap
         if max_hints_len < 10:
@@ -681,6 +685,36 @@ class DiskAnalyzerApp(App[None]):
                 break
         self._refresh_all()
 
+    def _copy_to_clipboard(self, text: str) -> bool:
+        if sys.platform == "darwin":
+            cmd = ["pbcopy"]
+        elif sys.platform == "win32":
+            cmd = ["clip"]
+        else:
+            cmd = ["xclip", "-selection", "clipboard"]
+        try:
+            subprocess.run(cmd, input=text.encode(), check=True)  # noqa: S603
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False
+
+    def _yank(self) -> None:
+        self._sync_selection_from_table()
+        if not self.rows:
+            return
+        row = self.rows[self.selected_index]
+
+        if self.current_view == "overview":
+            node = self.node_by_path.get(row.path)
+            text = row.path if node is not None else row.name
+        else:
+            text = row.path
+
+        if self._copy_to_clipboard(text):
+            self.notify(f"Copied: {text}", timeout=2)
+        else:
+            self.notify("Failed to copy to clipboard", severity="error", timeout=2)
+
     @on(DataTable.RowSelected)
     def _on_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.cursor_row != self.selected_index:
@@ -774,6 +808,9 @@ class DiskAnalyzerApp(App[None]):
         char = event.character or ""
 
         if self._handle_global_key(key):
+            return
+        if key == "y":
+            self._yank()
             return
         if self._handle_navigation_key(key, char):
             return
