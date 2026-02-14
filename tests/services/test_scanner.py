@@ -75,7 +75,26 @@ def test_progress_callback_invoked(tmp_path: Path) -> None:
     assert callbacks
 
 
-def test_symlinks_are_not_followed(tmp_path: Path) -> None:
+def test_symlinks_not_followed_by_default(tmp_path: Path) -> None:
+    target = tmp_path / "real_dir"
+    target.mkdir()
+    _write_file(target / "f.bin", 1)
+
+    link = tmp_path / "link_dir"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("symlink creation is not supported in this environment")
+
+    result = scan_path(tmp_path, ScanOptions(follow_symlinks=False), workers=1)
+    assert isinstance(result, Ok)
+    snapshot = result.unwrap()
+
+    link_node = next(node for node in snapshot.root.children if node.name == "link_dir")
+    assert not link_node.is_dir
+
+
+def test_symlinks_followed_when_enabled(tmp_path: Path) -> None:
     target = tmp_path / "real_dir"
     target.mkdir()
     _write_file(target / "f.bin", 1)
@@ -91,7 +110,7 @@ def test_symlinks_are_not_followed(tmp_path: Path) -> None:
     snapshot = result.unwrap()
 
     link_node = next(node for node in snapshot.root.children if node.name == "link_dir")
-    assert not link_node.is_dir
+    assert link_node.is_dir
 
 
 def test_cancellation_respected(tmp_path: Path) -> None:

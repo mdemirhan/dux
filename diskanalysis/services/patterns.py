@@ -88,41 +88,6 @@ def compile_rule(rule: PatternRule) -> CompiledRule:
     return CompiledRule(rule=rule, matchers=matchers, apply_to=rule.apply_to)
 
 
-def compile_rules(rules: list[PatternRule]) -> list[CompiledRule]:
-    return [compile_rule(r) for r in rules]
-
-
-def compiled_matches(cr: CompiledRule, path: str, basename: str, is_dir: bool) -> bool:
-    """Check whether a path matches a compiled rule.
-
-    Callers must pass *pre-lowercased* ``path`` and ``basename`` so that
-    the cost of lowercasing is paid once per entry, not once per rule.
-    """
-    if cr.apply_to == "file" and is_dir:
-        return False
-    if cr.apply_to == "dir" and not is_dir:
-        return False
-
-    for m in cr.matchers:
-        kind = m.kind
-        if kind == _CONTAINS:
-            if m.value in path or path.endswith(m.alt):
-                return True
-        elif kind == _ENDSWITH:
-            if basename.endswith(m.value):
-                return True
-        elif kind == _STARTSWITH:
-            if basename.startswith(m.value):
-                return True
-        elif kind == _EXACT:
-            if basename == m.value:
-                return True
-        else:  # _GLOB fallback
-            if _match_pattern_slow(m.value, path, basename):
-                return True
-    return False
-
-
 def _match_pattern_slow(pattern: str, normalized_path: str, basename: str) -> bool:
     """Fallback for patterns that can't be classified into simple string ops."""
     if pattern.endswith("/**"):

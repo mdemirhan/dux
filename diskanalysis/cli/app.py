@@ -101,26 +101,14 @@ def _scan_with_progress(path: Path, options: ScanOptions, workers: int) -> ScanR
     ) as live:
         while not done.is_set():
             with lock:
-                snapshot = _ScanProgress(
-                    current_path=progress.current_path,
-                    files=progress.files,
-                    directories=progress.directories,
-                    updates=progress.updates,
-                    start_time=progress.start_time,
-                )
+                snapshot = replace(progress)
             live.update(
                 _render_scan_panel(snapshot, workers, "Scanning directory tree...")
             )
             time.sleep(0.08)
 
         with lock:
-            final = _ScanProgress(
-                current_path=progress.current_path,
-                files=progress.files,
-                directories=progress.directories,
-                updates=progress.updates,
-                start_time=progress.start_time,
-            )
+            final = replace(progress)
         live.update(_render_scan_panel(final, workers, "Finalizing scan..."))
 
     thread.join()

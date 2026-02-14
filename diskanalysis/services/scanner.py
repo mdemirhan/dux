@@ -62,8 +62,7 @@ def scan_path(
         )
 
     resolved_root = str(root_path.absolute())
-    # Symlink traversal is intentionally disabled for deterministic, cycle-safe scans.
-    follow_symlinks = False
+    follow_symlinks = options.follow_symlinks
     try:
         root_stat = root_path.stat(follow_symlinks=follow_symlinks)
     except OSError as exc:

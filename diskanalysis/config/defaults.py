@@ -1,51 +1,30 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
 
 from diskanalysis.config.schema import AppConfig, PatternRule
 from diskanalysis.models.enums import InsightCategory
-
-
-def _rule(
-    name: str,
-    pattern: str,
-    category: InsightCategory,
-    safe_to_delete: bool,
-    recommendation: str,
-    apply_to: Literal["file", "dir", "both"] = "both",
-    stop_recursion: bool = False,
-) -> PatternRule:
-    return PatternRule(
-        name=name,
-        pattern=pattern,
-        category=category,
-        safe_to_delete=safe_to_delete,
-        recommendation=recommendation,
-        apply_to=apply_to,
-        stop_recursion=stop_recursion,
-    )
 
 
 def default_config() -> AppConfig:
     home = str(Path.home())
 
     temp_patterns = [
-        _rule(
+        PatternRule(
             "System Temp",
             "**/tmp/**",
             InsightCategory.TEMP,
             True,
             "rm -rf /tmp/<target>",
         ),
-        _rule(
+        PatternRule(
             "User Temp",
             "**/.tmp/**",
             InsightCategory.TEMP,
             True,
             "Clean temporary workspace files",
         ),
-        _rule(
+        PatternRule(
             "Log Files",
             "**/*.log",
             InsightCategory.TEMP,
@@ -53,42 +32,42 @@ def default_config() -> AppConfig:
             "Archive or delete stale logs",
             "file",
         ),
-        _rule(
+        PatternRule(
             "Python Bytecode",
             "**/__pycache__/**",
             InsightCategory.TEMP,
             True,
             "python -m compileall <project>",
         ),
-        _rule(
+        PatternRule(
             "Pytest Cache",
             "**/.pytest_cache/**",
             InsightCategory.TEMP,
             True,
             "pytest --cache-clear",
         ),
-        _rule(
+        PatternRule(
             "Mypy Cache",
             "**/.mypy_cache/**",
             InsightCategory.TEMP,
             True,
             "mypy --cache-dir /tmp/mypy",
         ),
-        _rule(
+        PatternRule(
             "Ruff Cache",
             "**/.ruff_cache/**",
             InsightCategory.TEMP,
             True,
             "ruff clean",
         ),
-        _rule(
+        PatternRule(
             "Coverage Files",
             "**/.coverage*",
             InsightCategory.TEMP,
             True,
             "coverage erase",
         ),
-        _rule(
+        PatternRule(
             "Editor Swaps",
             "**/*.{swp,swo,tmp,bak}",
             InsightCategory.TEMP,
@@ -96,7 +75,7 @@ def default_config() -> AppConfig:
             "Delete editor swap files",
             "file",
         ),
-        _rule(
+        PatternRule(
             "macOS Metadata",
             "**/.DS_Store",
             InsightCategory.TEMP,
@@ -104,7 +83,7 @@ def default_config() -> AppConfig:
             "find . -name .DS_Store -delete",
             "file",
         ),
-        _rule(
+        PatternRule(
             "npm Logs",
             "**/npm-debug.log*",
             InsightCategory.TEMP,
@@ -112,7 +91,7 @@ def default_config() -> AppConfig:
             "Delete npm debug logs",
             "file",
         ),
-        _rule(
+        PatternRule(
             "Yarn Logs",
             "**/yarn-error.log*",
             InsightCategory.TEMP,
@@ -120,14 +99,14 @@ def default_config() -> AppConfig:
             "Delete yarn error logs",
             "file",
         ),
-        _rule(
+        PatternRule(
             "Crash Reports",
             "**/Library/Application Support/CrashReporter/**",
             InsightCategory.TEMP,
             True,
             "Delete old crash reports",
         ),
-        _rule(
+        PatternRule(
             "SQLite Journals",
             "**/*.db-journal",
             InsightCategory.TEMP,
@@ -135,7 +114,7 @@ def default_config() -> AppConfig:
             "SQLite journal files, safe to delete when DB is not open",
             "file",
         ),
-        _rule(
+        PatternRule(
             "Terraform State Backups",
             "**/*.tfstate.backup",
             InsightCategory.TEMP,
@@ -147,77 +126,77 @@ def default_config() -> AppConfig:
 
     cache_patterns = [
         # ── Package managers ──
-        _rule(
+        PatternRule(
             "npm Cache",
             "**/.npm/**",
             InsightCategory.CACHE,
             True,
             "npm cache clean --force",
         ),
-        _rule(
+        PatternRule(
             "Yarn Cache",
             "**/.cache/yarn/**",
             InsightCategory.CACHE,
             True,
             "yarn cache clean",
         ),
-        _rule(
+        PatternRule(
             "pnpm Store",
             "**/.pnpm-store/**",
             InsightCategory.CACHE,
             True,
             "pnpm store prune",
         ),
-        _rule(
+        PatternRule(
             "pip Cache",
             "**/.cache/pip/**",
             InsightCategory.CACHE,
             True,
             "pip cache purge",
         ),
-        _rule(
+        PatternRule(
             "uv Cache",
             "**/.cache/uv/**",
             InsightCategory.CACHE,
             True,
             "uv cache clean",
         ),
-        _rule(
+        PatternRule(
             "poetry Cache",
             "**/.cache/pypoetry/**",
             InsightCategory.CACHE,
             True,
             "poetry cache clear pypi --all",
         ),
-        _rule(
+        PatternRule(
             "conda Packages",
             "**/.conda/pkgs/**",
             InsightCategory.CACHE,
             True,
             "conda clean --all",
         ),
-        _rule(
+        PatternRule(
             "Homebrew Cache",
             "**/Library/Caches/Homebrew/**",
             InsightCategory.CACHE,
             True,
             "brew cleanup",
         ),
-        _rule(
+        PatternRule(
             "NuGet Cache",
             "**/.nuget/packages/**",
             InsightCategory.CACHE,
             True,
             "dotnet nuget locals all --clear",
         ),
-        _rule(
+        PatternRule(
             "Composer Cache",
             "**/.composer/cache/**",
             InsightCategory.CACHE,
             True,
             "composer clear-cache",
         ),
-        _rule(
+        PatternRule(
             "Bundler Cache",
             "**/.bundle/cache/**",
             InsightCategory.CACHE,
@@ -225,35 +204,35 @@ def default_config() -> AppConfig:
             "bundle clean --force",
         ),
         # ── JVM ecosystem ──
-        _rule(
+        PatternRule(
             "Gradle Cache",
             "**/.gradle/**",
             InsightCategory.CACHE,
             True,
             "gradle --stop && rm -rf ~/.gradle/caches",
         ),
-        _rule(
+        PatternRule(
             "Maven Repo",
             "**/.m2/repository/**",
             InsightCategory.CACHE,
             False,
             "Review dependencies before deletion",
         ),
-        _rule(
+        PatternRule(
             "Ivy Cache",
             "**/.ivy2/cache/**",
             InsightCategory.CACHE,
             True,
             "rm -rf ~/.ivy2/cache",
         ),
-        _rule(
+        PatternRule(
             "SBT Boot",
             "**/.sbt/**",
             InsightCategory.CACHE,
             True,
             "rm -rf ~/.sbt/boot",
         ),
-        _rule(
+        PatternRule(
             "Coursier Cache",
             "**/.cache/coursier/**",
             InsightCategory.CACHE,
@@ -261,28 +240,28 @@ def default_config() -> AppConfig:
             "cs cache --help",
         ),
         # ── Rust / Go / Native ──
-        _rule(
+        PatternRule(
             "Cargo Registry",
             "**/.cargo/registry/**",
             InsightCategory.CACHE,
             True,
             "cargo cache -a",
         ),
-        _rule(
+        PatternRule(
             "rustup Downloads",
             "**/.rustup/downloads/**",
             InsightCategory.CACHE,
             True,
             "rustup self cleanup",
         ),
-        _rule(
+        PatternRule(
             "Go Module Cache",
             "**/go/pkg/mod/**",
             InsightCategory.CACHE,
             True,
             "go clean -modcache",
         ),
-        _rule(
+        PatternRule(
             "Go Build Cache",
             "**/.cache/go-build/**",
             InsightCategory.CACHE,
@@ -290,21 +269,21 @@ def default_config() -> AppConfig:
             "go clean -cache",
         ),
         # ── JS build tool caches ──
-        _rule(
+        PatternRule(
             "Turbo Cache",
             "**/.turbo/**",
             InsightCategory.CACHE,
             True,
             "turbo prune or delete .turbo",
         ),
-        _rule(
+        PatternRule(
             "Parcel Cache",
             "**/.parcel-cache/**",
             InsightCategory.CACHE,
             True,
             "Parcel will regenerate on build",
         ),
-        _rule(
+        PatternRule(
             "Node GYP",
             "**/.node-gyp/**",
             InsightCategory.CACHE,
@@ -312,14 +291,14 @@ def default_config() -> AppConfig:
             "npm cache clean --force",
         ),
         # ── Apple / Xcode ──
-        _rule(
+        PatternRule(
             "Xcode DerivedData",
             "**/Library/Developer/Xcode/DerivedData/**",
             InsightCategory.CACHE,
             True,
             "Delete Xcode DerivedData",
         ),
-        _rule(
+        PatternRule(
             "iOS Simulator",
             "**/Library/Developer/CoreSimulator/**",
             InsightCategory.CACHE,
@@ -327,28 +306,28 @@ def default_config() -> AppConfig:
             "Remove unused simulators from Xcode",
         ),
         # ── Containers / Infra ──
-        _rule(
+        PatternRule(
             "Docker Layers",
             "**/Library/Containers/com.docker.docker/**",
             InsightCategory.CACHE,
             False,
             "docker system prune",
         ),
-        _rule(
+        PatternRule(
             "Kube Cache",
             "**/.kube/cache/**",
             InsightCategory.CACHE,
             True,
             "Delete kube cache",
         ),
-        _rule(
+        PatternRule(
             "Terraform Plugins",
             "**/.terraform/**",
             InsightCategory.CACHE,
             True,
             "rm -rf .terraform && terraform init",
         ),
-        _rule(
+        PatternRule(
             "Ansible Temp",
             "**/.ansible/tmp/**",
             InsightCategory.CACHE,
@@ -356,28 +335,28 @@ def default_config() -> AppConfig:
             "Ansible will regenerate",
         ),
         # ── AI / ML model caches ──
-        _rule(
+        PatternRule(
             "HuggingFace Cache",
             "**/.cache/huggingface/**",
             InsightCategory.CACHE,
             False,
             "Review model cache before deleting",
         ),
-        _rule(
+        PatternRule(
             "PyTorch Cache",
             "**/.cache/torch/**",
             InsightCategory.CACHE,
             False,
             "Review model cache before deleting",
         ),
-        _rule(
+        PatternRule(
             "Whisper Cache",
             "**/.cache/whisper/**",
             InsightCategory.CACHE,
             False,
             "Review model cache before deleting",
         ),
-        _rule(
+        PatternRule(
             "Ollama Models",
             "**/.ollama/**",
             InsightCategory.CACHE,
@@ -385,7 +364,7 @@ def default_config() -> AppConfig:
             "ollama rm <model>",
         ),
         # ── Linters / pre-commit ──
-        _rule(
+        PatternRule(
             "pre-commit Cache",
             "**/.cache/pre-commit/**",
             InsightCategory.CACHE,
@@ -393,21 +372,21 @@ def default_config() -> AppConfig:
             "pre-commit clean",
         ),
         # ── Browsers ──
-        _rule(
+        PatternRule(
             "Chrome Cache",
             "**/Library/Caches/Google/Chrome/**",
             InsightCategory.CACHE,
             True,
             "Clear browser cache from settings",
         ),
-        _rule(
+        PatternRule(
             "Firefox Cache",
             "**/.cache/mozilla/firefox/**",
             InsightCategory.CACHE,
             True,
             "Clear Firefox cache",
         ),
-        _rule(
+        PatternRule(
             "Safari Cache",
             "**/Library/Caches/com.apple.Safari/**",
             InsightCategory.CACHE,
@@ -415,21 +394,21 @@ def default_config() -> AppConfig:
             "Clear Safari cache from settings",
         ),
         # ── IDEs / Editors ──
-        _rule(
+        PatternRule(
             "JetBrains Cache",
             "**/Library/Caches/JetBrains/**",
             InsightCategory.CACHE,
             True,
             "Invalidate IDE caches",
         ),
-        _rule(
+        PatternRule(
             "JetBrains Logs",
             "**/Library/Logs/JetBrains/**",
             InsightCategory.CACHE,
             True,
             "Delete IDE log files",
         ),
-        _rule(
+        PatternRule(
             "VSCode Cache",
             "**/Library/Application Support/Code/Cache/**",
             InsightCategory.CACHE,
@@ -440,7 +419,7 @@ def default_config() -> AppConfig:
 
     build_artifact_patterns = [
         # ── JS / Node ──
-        _rule(
+        PatternRule(
             "node_modules",
             "**/node_modules/**",
             InsightCategory.BUILD_ARTIFACT,
@@ -448,7 +427,7 @@ def default_config() -> AppConfig:
             "npm install",
             stop_recursion=True,
         ),
-        _rule(
+        PatternRule(
             "Bower Components",
             "**/bower_components/**",
             InsightCategory.BUILD_ARTIFACT,
@@ -456,7 +435,7 @@ def default_config() -> AppConfig:
             "bower install",
             stop_recursion=True,
         ),
-        _rule(
+        PatternRule(
             "Next.js build",
             "**/.next/**",
             InsightCategory.BUILD_ARTIFACT,
@@ -464,7 +443,7 @@ def default_config() -> AppConfig:
             "next build",
             stop_recursion=True,
         ),
-        _rule(
+        PatternRule(
             "Nuxt build",
             "**/.nuxt/**",
             InsightCategory.BUILD_ARTIFACT,
@@ -473,7 +452,7 @@ def default_config() -> AppConfig:
             stop_recursion=True,
         ),
         # ── Python ──
-        _rule(
+        PatternRule(
             "Python venv",
             "**/.venv/**",
             InsightCategory.BUILD_ARTIFACT,
@@ -481,7 +460,7 @@ def default_config() -> AppConfig:
             "Recreate with uv venv .venv",
             stop_recursion=True,
         ),
-        _rule(
+        PatternRule(
             "Python venv",
             "**/venv/**",
             InsightCategory.BUILD_ARTIFACT,
@@ -489,7 +468,7 @@ def default_config() -> AppConfig:
             "python -m venv venv",
             stop_recursion=True,
         ),
-        _rule(
+        PatternRule(
             "Python cache",
             "**/__pycache__/**",
             InsightCategory.BUILD_ARTIFACT,
@@ -497,7 +476,7 @@ def default_config() -> AppConfig:
             "Regenerated on run",
             stop_recursion=True,
         ),
-        _rule(
+        PatternRule(
             "Python Egg Info",
             "**/*.egg-info",
             InsightCategory.BUILD_ARTIFACT,
@@ -506,7 +485,7 @@ def default_config() -> AppConfig:
             apply_to="dir",
             stop_recursion=True,
         ),
-        _rule(
+        PatternRule(
             "tox env",
             "**/.tox/**",
             InsightCategory.BUILD_ARTIFACT,
@@ -515,7 +494,7 @@ def default_config() -> AppConfig:
             stop_recursion=True,
         ),
         # ── Generic build outputs ──
-        _rule(
+        PatternRule(
             "Build dir",
             "**/build/**",
             InsightCategory.BUILD_ARTIFACT,
@@ -523,7 +502,7 @@ def default_config() -> AppConfig:
             "Re-run build command",
             stop_recursion=True,
         ),
-        _rule(
+        PatternRule(
             "Dist dir",
             "**/dist/**",
             InsightCategory.BUILD_ARTIFACT,
@@ -531,7 +510,7 @@ def default_config() -> AppConfig:
             "Re-run package build",
             stop_recursion=True,
         ),
-        _rule(
+        PatternRule(
             "Object files",
             "**/obj/**",
             InsightCategory.BUILD_ARTIFACT,
@@ -539,7 +518,7 @@ def default_config() -> AppConfig:
             "dotnet build",
             stop_recursion=True,
         ),
-        _rule(
+        PatternRule(
             "Binary output",
             "**/bin/**",
             InsightCategory.BUILD_ARTIFACT,
@@ -547,7 +526,7 @@ def default_config() -> AppConfig:
             "Rebuild binaries",
             stop_recursion=True,
         ),
-        _rule(
+        PatternRule(
             "Coverage artifacts",
             "**/coverage/**",
             InsightCategory.BUILD_ARTIFACT,
@@ -556,7 +535,7 @@ def default_config() -> AppConfig:
             stop_recursion=True,
         ),
         # ── Native / compiled languages ──
-        _rule(
+        PatternRule(
             "Rust target",
             "**/target/**",
             InsightCategory.BUILD_ARTIFACT,
@@ -564,7 +543,7 @@ def default_config() -> AppConfig:
             "cargo build",
             stop_recursion=True,
         ),
-        _rule(
+        PatternRule(
             "Swift build",
             "**/.build/**",
             InsightCategory.BUILD_ARTIFACT,
@@ -572,7 +551,7 @@ def default_config() -> AppConfig:
             "swift build",
             stop_recursion=True,
         ),
-        _rule(
+        PatternRule(
             "CMake build",
             "**/CMakeFiles/**",
             InsightCategory.BUILD_ARTIFACT,
@@ -580,7 +559,7 @@ def default_config() -> AppConfig:
             "Re-run cmake",
             stop_recursion=True,
         ),
-        _rule(
+        PatternRule(
             "Zig cache",
             "**/zig-cache/**",
             InsightCategory.BUILD_ARTIFACT,
@@ -589,7 +568,7 @@ def default_config() -> AppConfig:
             stop_recursion=True,
         ),
         # ── .NET / NuGet ──
-        _rule(
+        PatternRule(
             "NuGet packages",
             "**/packages/**",
             InsightCategory.BUILD_ARTIFACT,
@@ -600,7 +579,7 @@ def default_config() -> AppConfig:
     ]
 
     custom_patterns = [
-        _rule(
+        PatternRule(
             "Archive files",
             "**/*.{zip,tar,gz,7z,dmg,iso}",
             InsightCategory.CUSTOM,
@@ -608,7 +587,7 @@ def default_config() -> AppConfig:
             "Archive files may be backup artifacts; verify before removing.",
             apply_to="file",
         ),
-        _rule(
+        PatternRule(
             "Database Dumps",
             "**/*.{sql,dump,dmp}",
             InsightCategory.CUSTOM,
@@ -616,7 +595,7 @@ def default_config() -> AppConfig:
             "Database dump; verify it is not a needed backup before removing.",
             apply_to="file",
         ),
-        _rule(
+        PatternRule(
             "VM Disk Images",
             "**/*.{vmdk,vdi,qcow2}",
             InsightCategory.CUSTOM,
@@ -624,7 +603,7 @@ def default_config() -> AppConfig:
             "Virtual machine disk image; review before removing.",
             apply_to="file",
         ),
-        _rule(
+        PatternRule(
             "Core Dumps",
             "**/core.*",
             InsightCategory.CUSTOM,

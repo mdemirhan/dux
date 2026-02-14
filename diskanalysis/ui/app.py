@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import heapq
 from dataclasses import dataclass
 from typing import Callable, override
 
@@ -16,9 +15,10 @@ from diskanalysis.models.enums import InsightCategory, NodeKind
 from diskanalysis.models.insight import Insight, InsightBundle
 from diskanalysis.models.scan import ScanNode, ScanStats
 from diskanalysis.services.formatting import format_bytes, format_ts, relative_bar
+from diskanalysis.services.tree import top_nodes
 
 
-TABS = ["overview", "browse", "large_dir", "large_file", "temp"]
+TABS: tuple[str, ...] = ("overview", "browse", "large_dir", "large_file", "temp")
 
 _TAB_LABELS: dict[str, str] = {
     "overview": "Overview",
@@ -41,19 +41,28 @@ class DisplayRow:
     path: str
     name: str
     size_bytes: int
-    right: str
+    detail: str
     type_label: str = ""
 
 
 _PAGED_VIEWS = {"temp", "large_dir", "large_file"}
 
+_TEMP_CATEGORIES = frozenset(
+    {InsightCategory.TEMP, InsightCategory.CACHE, InsightCategory.BUILD_ARTIFACT}
+)
 
-@dataclass(slots=True)
+
 class _PagedState:
-    all_rows: list[DisplayRow] | None = None
-    total_rows: int = 0
-    page_index: int = 0
-    total_items: int = 0
+    __slots__ = ("all_rows", "page_index", "total_items")
+
+    def __init__(self) -> None:
+        self.all_rows: list[DisplayRow] | None = None
+        self.page_index: int = 0
+        self.total_items: int = 0
+
+    @property
+    def total_rows(self) -> int:
+        return len(self.all_rows) if self.all_rows is not None else 0
 
 
 class HelpOverlay(ModalScreen[None]):
@@ -131,9 +140,10 @@ class DiskAnalyzerApp(App[None]):
         self.current_view = initial_view if initial_view in TABS else "overview"
 
         self._page_size = config.page_size
-        self._page_jump = config.scroll_step
+        self._scroll_step = config.scroll_step
         self._overview_top = config.overview_top_folders
-        self._max_insights = config.max_insights_per_category
+        self._top_n_limit = config.max_insights_per_category
+        self._root_prefix = root.path.rstrip("/") + "/"
 
         self.node_by_path: dict[str, ScanNode] = {}
         self.parent_by_path: dict[str, str] = {}
@@ -243,7 +253,7 @@ class DiskAnalyzerApp(App[None]):
         self.rows = self._build_rows_for_current_view()
         if not self.rows:
             self.rows = [
-                DisplayRow(path=".", name="(no data)", size_bytes=0, right="-")
+                DisplayRow(path=".", name="(no data)", size_bytes=0, detail="-")
             ]
 
         total = max(
@@ -260,16 +270,14 @@ class DiskAnalyzerApp(App[None]):
                 relative_bar(row.size_bytes, total, 18) if row.size_bytes > 0 else ""
             )
             if row.path == "separator":
-                if is_temp:
-                    table.add_row("─" * 40, "", "", "")
-                elif is_browse:
+                if is_temp or is_browse:
                     table.add_row("─" * 40, "", "", "")
                 else:
                     table.add_row("─" * 40, "", "")
             elif is_temp:
-                table.add_row(row.name, size_text, row.type_label, row.right)
+                table.add_row(row.name, size_text, row.type_label, row.detail)
             elif is_browse:
-                table.add_row(row.name, size_text, bar_text, row.right)
+                table.add_row(row.name, size_text, bar_text, row.detail)
             else:
                 table.add_row(row.name, size_text, bar_text)
 
@@ -286,7 +294,8 @@ class DiskAnalyzerApp(App[None]):
         left = f"Row {cursor}/{total_rows}"
         if paged_total > self._page_size:
             total_pages = max(1, (paged_total + self._page_size - 1) // self._page_size)
-            page_index = state.page_index if state is not None else 0
+            assert state is not None
+            page_index = state.page_index
             left += f" | Page {page_index + 1}/{total_pages}"
         trimmed_text = self._trimmed_indicator(self.current_view)
         if trimmed_text:
@@ -335,7 +344,6 @@ class DiskAnalyzerApp(App[None]):
         state = self._paged_states[view]
         if state.all_rows is None:
             state.all_rows, state.total_items = self._build_all_paged_rows(view)
-            state.total_rows = len(state.all_rows)
         total_pages = max(
             1, (state.total_rows + self._page_size - 1) // self._page_size
         )
@@ -346,24 +354,13 @@ class DiskAnalyzerApp(App[None]):
 
     def _build_all_paged_rows(self, view: str) -> tuple[list[DisplayRow], int]:
         if view == "temp":
-            rows = self._insight_rows(
-                lambda i: (
-                    i.category
-                    in {
-                        InsightCategory.TEMP,
-                        InsightCategory.CACHE,
-                        InsightCategory.BUILD_ARTIFACT,
-                    }
-                )
-            )
-            cat_set = {
-                InsightCategory.TEMP,
-                InsightCategory.CACHE,
-                InsightCategory.BUILD_ARTIFACT,
-            }
+            rows = self._insight_rows(lambda i: i.category in _TEMP_CATEGORIES)
             total_items = len(
                 set().union(
-                    *(self.bundle.category_paths.get(cat, set()) for cat in cat_set)
+                    *(
+                        self.bundle.category_paths.get(cat, set())
+                        for cat in _TEMP_CATEGORIES
+                    )
                 )
             )
             return rows, total_items
@@ -416,56 +413,48 @@ class DiskAnalyzerApp(App[None]):
                 path="stats.total",
                 name=f"Total Size: {format_bytes(self.root.size_bytes)}",
                 size_bytes=self.root.size_bytes,
-                right="",
+                detail="",
             ),
             DisplayRow(
                 path="stats.files",
                 name=f"Files: {self.stats.files:,}",
                 size_bytes=0,
-                right="",
+                detail="",
             ),
             DisplayRow(
                 path="stats.dirs",
                 name=f"Directories: {self.stats.directories:,}",
                 size_bytes=0,
-                right="",
+                detail="",
             ),
             DisplayRow(
                 path="stats.temp",
                 name=f"Temp: {format_bytes(temp_size)}",
                 size_bytes=temp_size,
-                right="",
+                detail="",
             ),
             DisplayRow(
                 path="stats.cache",
                 name=f"Cache: {format_bytes(cache_size)}",
                 size_bytes=cache_size,
-                right="",
+                detail="",
             ),
             DisplayRow(
                 path="stats.build",
                 name=f"Build Artifacts: {format_bytes(build_size)}",
                 size_bytes=build_size,
-                right="",
+                detail="",
             ),
             DisplayRow(
                 path="separator",
                 name=f"── Largest {self._overview_top} folders ──",
                 size_bytes=0,
-                right="",
+                detail="",
             ),
         ]
 
-        top_dirs = heapq.nlargest(
-            self._overview_top,
-            (
-                n
-                for n in self.node_by_path.values()
-                if n.is_dir and n.path != self.root.path
-            ),
-            key=lambda x: x.size_bytes,
-        )
-        root_prefix = self.root.path.rstrip("/") + "/"
+        top_dirs = top_nodes(self.root, self._overview_top, NodeKind.DIRECTORY)
+        root_prefix = self._root_prefix
         for node in top_dirs:
             display_path = (
                 node.path[len(root_prefix) :]
@@ -477,7 +466,7 @@ class DiskAnalyzerApp(App[None]):
                     path=node.path,
                     name=display_path,
                     size_bytes=node.size_bytes,
-                    right="",
+                    detail="",
                 )
             )
         return rows
@@ -498,7 +487,7 @@ class DiskAnalyzerApp(App[None]):
                     path=node.path,
                     name=label,
                     size_bytes=node.size_bytes,
-                    right=format_ts(node.modified_ts),
+                    detail=format_ts(node.modified_ts),
                 )
             )
             if node.kind is NodeKind.DIRECTORY and node.path in self.expanded:
@@ -507,9 +496,11 @@ class DiskAnalyzerApp(App[None]):
         return rows
 
     def _insight_rows(self, predicate: Callable[[Insight], bool]) -> list[DisplayRow]:
-        root_prefix = self.root.path.rstrip("/") + "/"
+        root_prefix = self._root_prefix
         rows: list[DisplayRow] = []
-        for item in [x for x in self.bundle.insights if predicate(x)]:
+        for item in self.bundle.insights:
+            if not predicate(item):
+                continue
             display_path = (
                 item.path[len(root_prefix) :]
                 if item.path.startswith(root_prefix)
@@ -523,23 +514,16 @@ class DiskAnalyzerApp(App[None]):
                     path=item.path,
                     name=display_path,
                     size_bytes=item.size_bytes,
-                    right=label,
+                    detail=label,
                     type_label=type_label,
                 )
             )
         return rows
 
     def _top_nodes_rows(self, kind: NodeKind) -> list[DisplayRow]:
-        root_prefix = self.root.path.rstrip("/") + "/"
-        top_n = self._max_insights
-        items = (
-            node
-            for node in self.node_by_path.values()
-            if node.kind is kind and node.path != self.root.path
-        )
-        top_nodes = heapq.nlargest(top_n, items, key=lambda n: n.size_bytes)
+        root_prefix = self._root_prefix
         rows: list[DisplayRow] = []
-        for node in top_nodes:
+        for node in top_nodes(self.root, self._top_n_limit, kind):
             display_path = (
                 node.path[len(root_prefix) :]
                 if node.path.startswith(root_prefix)
@@ -550,7 +534,7 @@ class DiskAnalyzerApp(App[None]):
                     path=node.path,
                     name=display_path,
                     size_bytes=node.size_bytes,
-                    right="",
+                    detail="",
                 )
             )
         return rows
@@ -592,20 +576,10 @@ class DiskAnalyzerApp(App[None]):
         self._render_footer_rows()
 
     def _move_top(self) -> None:
-        if not self.rows:
-            return
-        self.selected_index = 0
-        table = self.query_one("#content-table", DataTable)
-        table.move_cursor(row=0, animate=False)
-        self._render_footer_rows()
+        self._move_selection(-len(self.rows))
 
     def _move_bottom(self) -> None:
-        if not self.rows:
-            return
-        self.selected_index = max(0, len(self.rows) - 1)
-        table = self.query_one("#content-table", DataTable)
-        table.move_cursor(row=self.selected_index, animate=False)
-        self._render_footer_rows()
+        self._move_selection(len(self.rows))
 
     def _sync_selection_from_table(self) -> None:
         if not self.rows:
@@ -752,10 +726,10 @@ class DiskAnalyzerApp(App[None]):
             self._move_selection(-1)
             return True
         if key in {"ctrl+d", "pagedown"}:
-            self._move_selection(self._page_jump)
+            self._move_selection(self._scroll_step)
             return True
         if key in {"ctrl+u", "pageup"}:
-            self._move_selection(-self._page_jump)
+            self._move_selection(-self._scroll_step)
             return True
         if key in {"home", "ctrl+home"}:
             self._move_top()

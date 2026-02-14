@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import heapq
-
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -11,19 +9,7 @@ from diskanalysis.models.enums import NodeKind
 from diskanalysis.models.insight import Insight, InsightBundle
 from diskanalysis.models.scan import ScanNode, ScanStats
 from diskanalysis.services.formatting import format_bytes
-
-
-def _iter_nodes(root: ScanNode):
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        yield node
-        stack.extend(node.children)
-
-
-def _top_consumers(root: ScanNode, top_n: int) -> list[ScanNode]:
-    items = (node for node in _iter_nodes(root) if node.path != root.path)
-    return heapq.nlargest(top_n, items, key=lambda n: n.size_bytes)
+from diskanalysis.services.tree import top_nodes
 
 
 def _stats_panel(root: ScanNode, stats: ScanStats) -> Panel:
@@ -50,7 +36,7 @@ def render_summary(
     top_table.add_column("Type", justify="center")
     top_table.add_column("Size", justify="right")
 
-    for node in _top_consumers(root, config.summary_top_count):
+    for node in top_nodes(root, config.summary_top_count):
         top_table.add_row(
             node.path,
             "DIR" if node.kind is NodeKind.DIRECTORY else "FILE",
@@ -88,18 +74,13 @@ def render_top_nodes(
         )
     )
 
-    items = (
-        node
-        for node in _iter_nodes(root)
-        if node.path != root.path and node.kind is kind
-    )
-    top_nodes = heapq.nlargest(top_n, items, key=lambda n: n.size_bytes)
+    candidates = top_nodes(root, top_n, kind)
 
     table = Table(title="Top Candidates", header_style="bold yellow")
     table.add_column("Path")
     table.add_column("Size", justify="right")
 
-    for node in top_nodes:
+    for node in candidates:
         table.add_row(node.path, format_bytes(node.size_bytes))
     console.print(table)
 
