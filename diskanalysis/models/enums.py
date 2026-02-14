@@ -11,7 +11,5 @@ class NodeKind(str, Enum):
 class InsightCategory(str, Enum):
     TEMP = "temp"
     CACHE = "cache"
-    LARGE_FILE = "large_file"
-    LARGE_DIRECTORY = "large_directory"
     BUILD_ARTIFACT = "build_artifact"
     CUSTOM = "custom"

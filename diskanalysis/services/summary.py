@@ -50,7 +50,7 @@ def render_summary(
     top_table.add_column("Type", justify="center")
     top_table.add_column("Size", justify="right")
 
-    for node in _top_consumers(root, config.top_n):
+    for node in _top_consumers(root, config.summary_top_count):
         top_table.add_row(
             node.path,
             "DIR" if node.kind is NodeKind.DIRECTORY else "FILE",
@@ -72,6 +72,36 @@ def render_summary(
     ):
         cat_table.add_row(category, str(count), format_bytes(total))
     console.print(cat_table)
+
+
+def render_top_nodes(
+    console: Console,
+    title: str,
+    root: ScanNode,
+    top_n: int,
+    kind: NodeKind,
+) -> None:
+    console.print(
+        Panel(
+            f"Analyzed: [bold]{format_bytes(root.size_bytes)}[/bold]",
+            title=title,
+        )
+    )
+
+    items = (
+        node
+        for node in _iter_nodes(root)
+        if node.path != root.path and node.kind is kind
+    )
+    top_nodes = heapq.nlargest(top_n, items, key=lambda n: n.size_bytes)
+
+    table = Table(title="Top Candidates", header_style="bold yellow")
+    table.add_column("Path")
+    table.add_column("Size", justify="right")
+
+    for node in top_nodes:
+        table.add_row(node.path, format_bytes(node.size_bytes))
+    console.print(table)
 
 
 def render_focused_summary(

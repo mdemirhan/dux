@@ -24,15 +24,13 @@ _TAB_LABELS: dict[str, str] = {
     "overview": "Overview",
     "browse": "Browse",
     "temp": "Temporary Files",
-    "large_dir": "Large Folders",
-    "large_file": "Large Files",
+    "large_dir": "Folders by Size",
+    "large_file": "Files by Size",
 }
 
 _CATEGORY_LABELS: dict[str, str] = {
     "temp": "Temp",
     "cache": "Cache",
-    "large_file": "Large File",
-    "large_directory": "Large Dir",
     "build_artifact": "Build Artifact",
     "custom": "Custom",
 }
@@ -45,6 +43,17 @@ class DisplayRow:
     size_bytes: int
     right: str
     type_label: str = ""
+
+
+_PAGED_VIEWS = {"temp", "large_dir", "large_file"}
+
+
+@dataclass(slots=True)
+class _PagedState:
+    all_rows: list[DisplayRow] | None = None
+    total_rows: int = 0
+    page_index: int = 0
+    total_items: int = 0
 
 
 class HelpOverlay(ModalScreen[None]):
@@ -122,7 +131,7 @@ class DiskAnalyzerApp(App[None]):
         self.current_view = initial_view if initial_view in TABS else "overview"
 
         self._page_size = config.page_size
-        self._page_jump = config.page_jump_size
+        self._page_jump = config.scroll_step
         self._overview_top = config.overview_top_folders
         self._max_insights = config.max_insights_per_category
 
@@ -137,11 +146,9 @@ class DiskAnalyzerApp(App[None]):
         self.selected_index = 0
         self.pending_g = False
         self._rows_cache: dict[str, list[DisplayRow]] = {}
-        self._view_shown_counts: dict[str, int] = {}
-        self._view_total_counts: dict[str, int] = {}
-        self._page_index = 0
-        self._paged_total_rows = 0
-        self._paged_all_rows_cache: list[DisplayRow] | None = None
+        self._paged_states: dict[str, _PagedState] = {
+            v: _PagedState() for v in _PAGED_VIEWS
+        }
         self._view_cursor: dict[str, int] = {}
         self._view_scroll: dict[str, float] = {}
 
@@ -184,10 +191,8 @@ class DiskAnalyzerApp(App[None]):
 
     def _invalidate_rows(self, view: str) -> None:
         self._rows_cache.pop(view, None)
-        self._view_shown_counts.pop(view, None)
-        self._paged_all_rows_cache = None
-        self._paged_total_rows = 0
-        self._page_index = 0
+        if view in _PAGED_VIEWS:
+            self._paged_states[view] = _PagedState()
 
     def _invalidate_browse_rows(self) -> None:
         self._invalidate_rows("browse")
@@ -275,12 +280,14 @@ class DiskAnalyzerApp(App[None]):
         total_rows = len(self.rows)
         cursor = min(total_rows, self.selected_index + 1)
 
+        state = self._paged_states.get(self.current_view)
+        paged_total = state.total_rows if state is not None else 0
+
         left = f"Row {cursor}/{total_rows}"
-        if self._paged_total_rows > self._page_size:
-            total_pages = max(
-                1, (self._paged_total_rows + self._page_size - 1) // self._page_size
-            )
-            left += f" | Page {self._page_index + 1}/{total_pages}"
+        if paged_total > self._page_size:
+            total_pages = max(1, (paged_total + self._page_size - 1) // self._page_size)
+            page_index = state.page_index if state is not None else 0
+            left += f" | Page {page_index + 1}/{total_pages}"
         trimmed_text = self._trimmed_indicator(self.current_view)
         if trimmed_text:
             left += f" | {trimmed_text}"
@@ -288,7 +295,7 @@ class DiskAnalyzerApp(App[None]):
         hints = "q quit | ? help | Tab views | j/k move"
         if self.current_view == "browse":
             hints += " | h/l collapse-expand | Enter drill-in | Backspace drill-out"
-        if self._paged_total_rows > self._page_size:
+        if paged_total > self._page_size:
             hints += " | \\[ prev | ] next"
 
         width = self.size.width
@@ -307,11 +314,8 @@ class DiskAnalyzerApp(App[None]):
         )
 
     def _build_rows_for_current_view(self) -> list[DisplayRow]:
-        if self.current_view == "temp":
-            rows = self._paged_rows()
-            self._rows_cache[self.current_view] = rows
-            self._view_shown_counts[self.current_view] = self._paged_total_rows
-            return rows
+        if self.current_view in _PAGED_VIEWS:
+            return self._paged_view_rows(self.current_view)
 
         cached = self._rows_cache.get(self.current_view)
         if cached is not None:
@@ -321,23 +325,28 @@ class DiskAnalyzerApp(App[None]):
             rows = self._overview_rows()
         elif self.current_view == "browse":
             rows = self._browse_rows()
-        elif self.current_view == "large_dir":
-            rows = self._insight_rows(
-                lambda i: i.category is InsightCategory.LARGE_DIRECTORY
-            )
         else:
-            rows = self._insight_rows(
-                lambda i: i.category is InsightCategory.LARGE_FILE
-            )
+            rows = []
 
         self._rows_cache[self.current_view] = rows
-        if self.current_view in {"large_dir", "large_file"}:
-            self._view_shown_counts[self.current_view] = len(rows)
         return rows
 
-    def _paged_rows(self) -> list[DisplayRow]:
-        if self._paged_all_rows_cache is None:
-            self._paged_all_rows_cache = self._insight_rows(
+    def _paged_view_rows(self, view: str) -> list[DisplayRow]:
+        state = self._paged_states[view]
+        if state.all_rows is None:
+            state.all_rows, state.total_items = self._build_all_paged_rows(view)
+            state.total_rows = len(state.all_rows)
+        total_pages = max(
+            1, (state.total_rows + self._page_size - 1) // self._page_size
+        )
+        state.page_index = max(0, min(state.page_index, total_pages - 1))
+        start = state.page_index * self._page_size
+        end = start + self._page_size
+        return state.all_rows[start:end]
+
+    def _build_all_paged_rows(self, view: str) -> tuple[list[DisplayRow], int]:
+        if view == "temp":
+            rows = self._insight_rows(
                 lambda i: (
                     i.category
                     in {
@@ -347,81 +356,52 @@ class DiskAnalyzerApp(App[None]):
                     }
                 )
             )
-            self._paged_total_rows = len(self._paged_all_rows_cache)
-
-        total_pages = max(
-            1, (self._paged_total_rows + self._page_size - 1) // self._page_size
-        )
-        self._page_index = max(0, min(self._page_index, total_pages - 1))
-        start = self._page_index * self._page_size
-        end = start + self._page_size
-        return self._paged_all_rows_cache[start:end]
-
-    def _next_page(self) -> None:
-        total_pages = max(
-            1, (self._paged_total_rows + self._page_size - 1) // self._page_size
-        )
-        if self._page_index >= total_pages - 1:
-            return
-        self._page_index += 1
-        self.selected_index = 0
-        self._rows_cache.pop(self.current_view, None)
-        self._refresh_all()
-
-    def _prev_page(self) -> None:
-        if self._page_index == 0:
-            return
-        self._page_index -= 1
-        self.selected_index = 0
-        self._rows_cache.pop(self.current_view, None)
-        self._refresh_all()
-
-    def _view_categories(self, view: str) -> tuple[InsightCategory, ...]:
-        if view == "temp":
-            return (
+            cat_set = {
                 InsightCategory.TEMP,
                 InsightCategory.CACHE,
                 InsightCategory.BUILD_ARTIFACT,
-            )
-        if view == "large_dir":
-            return (InsightCategory.LARGE_DIRECTORY,)
-        if view == "large_file":
-            return (InsightCategory.LARGE_FILE,)
-        return ()
-
-    def _trimmed_indicator(self, view: str) -> str:
-        categories = self._view_categories(view)
-        if not categories:
-            return ""
-
-        cat_set = set(categories)
-
-        total = self._view_total_counts.get(view)
-        if total is None:
-            total = len(
+            }
+            total_items = len(
                 set().union(
                     *(self.bundle.category_paths.get(cat, set()) for cat in cat_set)
                 )
             )
-            self._view_total_counts[view] = total
-        if total == 0:
-            return ""
+            return rows, total_items
+        if view == "large_dir":
+            rows = self._top_nodes_rows(NodeKind.DIRECTORY)
+            return rows, self.stats.directories
+        # large_file
+        rows = self._top_nodes_rows(NodeKind.FILE)
+        return rows, self.stats.files
 
-        trimmed = any(
-            self.bundle.category_counts.get(cat, 0) > self._max_insights
-            for cat in categories
+    def _next_page(self) -> None:
+        state = self._paged_states.get(self.current_view)
+        if state is None:
+            return
+        total_pages = max(
+            1, (state.total_rows + self._page_size - 1) // self._page_size
         )
+        if state.page_index >= total_pages - 1:
+            return
+        state.page_index += 1
+        self.selected_index = 0
+        self._refresh_all()
 
-        shown = self._view_shown_counts.get(view)
-        if shown is None:
-            shown = len(
-                [item for item in self.bundle.insights if item.category in cat_set]
-            )
-            self._view_shown_counts[view] = shown
+    def _prev_page(self) -> None:
+        state = self._paged_states.get(self.current_view)
+        if state is None or state.page_index == 0:
+            return
+        state.page_index -= 1
+        self.selected_index = 0
+        self._refresh_all()
 
-        if trimmed:
-            return f"Showing {shown:,} of {total:,} results"
-        return f"Showing {shown:,} results"
+    def _trimmed_indicator(self, view: str) -> str:
+        state = self._paged_states.get(view)
+        if state is None or state.all_rows is None or state.total_items == 0:
+            return ""
+        if state.total_rows < state.total_items:
+            return f"Showing {state.total_rows:,} of {state.total_items:,} results"
+        return f"Showing {state.total_rows:,} results"
 
     def _category_size(self, *categories: InsightCategory) -> int:
         return sum(self.bundle.category_sizes.get(cat, 0) for cat in categories)
@@ -545,6 +525,32 @@ class DiskAnalyzerApp(App[None]):
                     size_bytes=item.size_bytes,
                     right=label,
                     type_label=type_label,
+                )
+            )
+        return rows
+
+    def _top_nodes_rows(self, kind: NodeKind) -> list[DisplayRow]:
+        root_prefix = self.root.path.rstrip("/") + "/"
+        top_n = self._max_insights
+        items = (
+            node
+            for node in self.node_by_path.values()
+            if node.kind is kind and node.path != self.root.path
+        )
+        top_nodes = heapq.nlargest(top_n, items, key=lambda n: n.size_bytes)
+        rows: list[DisplayRow] = []
+        for node in top_nodes:
+            display_path = (
+                node.path[len(root_prefix) :]
+                if node.path.startswith(root_prefix)
+                else node.path
+            )
+            rows.append(
+                DisplayRow(
+                    path=node.path,
+                    name=display_path,
+                    size_bytes=node.size_bytes,
+                    right="",
                 )
             )
         return rows
@@ -797,7 +803,8 @@ class DiskAnalyzerApp(App[None]):
             return
         if self._handle_navigation_key(key, char):
             return
-        if self._paged_total_rows > self._page_size:
+        state = self._paged_states.get(self.current_view)
+        if state is not None and state.total_rows > self._page_size:
             if key == "left_square_bracket" or char == "[":
                 self._prev_page()
                 return

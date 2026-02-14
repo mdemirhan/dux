@@ -91,10 +91,6 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
         category_paths[cat].add(insight.path)
         _heap_push(heaps[cat], seen[cat], insight, config.max_insights_per_category)
 
-    # --- thresholds ---
-    large_file_bytes = config.thresholds.large_file_bytes
-    large_dir_bytes = config.thresholds.large_dir_bytes
-
     # --- main traversal ---
     _TEMP = InsightCategory.TEMP
     _CACHE = InsightCategory.CACHE
@@ -128,33 +124,6 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
                 local_in_temp_cache = True
             if rule.stop_recursion:
                 build_rule = rule
-
-        if not local_in_temp_cache:
-            if not is_dir and node.size_bytes >= large_file_bytes:
-                _record(
-                    Insight(
-                        path=path,
-                        size_bytes=node.size_bytes,
-                        category=InsightCategory.LARGE_FILE,
-                        safe_to_delete=False,
-                        summary="Large file",
-                        recommendation="Review whether this file is still needed.",
-                        modified_ts=node.modified_ts,
-                    )
-                )
-
-            if is_dir and node.size_bytes >= large_dir_bytes:
-                _record(
-                    Insight(
-                        path=path,
-                        size_bytes=node.size_bytes,
-                        category=InsightCategory.LARGE_DIRECTORY,
-                        safe_to_delete=False,
-                        summary="Large directory",
-                        recommendation="Inspect directory contents for cleanup opportunities.",
-                        modified_ts=node.modified_ts,
-                    )
-                )
 
         if is_dir:
             if build_rule is not None:

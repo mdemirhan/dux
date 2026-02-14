@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 
 from diskanalysis.config.defaults import default_config
-from diskanalysis.config.schema import PatternRule, Thresholds
+from diskanalysis.config.schema import PatternRule
 from diskanalysis.models.enums import InsightCategory, NodeKind
 from diskanalysis.models.scan import ScanNode
 from diskanalysis.services.insights import generate_insights
@@ -57,15 +57,6 @@ def test_cache_analyzer_path_matching_and_threshold_logic() -> None:
     bundle = generate_insights(_tree_with(node), config)
 
     assert any(item.category is InsightCategory.CACHE for item in bundle.insights)
-
-
-def test_large_file_detection() -> None:
-    config = default_config()
-    config.thresholds = Thresholds(large_file_mb=1, large_dir_mb=2048)
-    node = _file("/root/huge.dump", size=2 * 1024 * 1024)
-    bundle = generate_insights(_tree_with(node), config)
-
-    assert any(item.category is InsightCategory.LARGE_FILE for item in bundle.insights)
 
 
 def test_build_artifact_detection() -> None:

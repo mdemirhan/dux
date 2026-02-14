@@ -7,18 +7,6 @@ from diskanalysis.models.enums import InsightCategory
 
 
 @dataclass(slots=True)
-class Thresholds:
-    large_file_mb: int = 512
-    large_dir_mb: int = 2048
-    large_file_bytes: int = field(init=False)
-    large_dir_bytes: int = field(init=False)
-
-    def __post_init__(self) -> None:
-        self.large_file_bytes = self.large_file_mb * 1024 * 1024
-        self.large_dir_bytes = self.large_dir_mb * 1024 * 1024
-
-
-@dataclass(slots=True)
 class PatternRule:
     name: str
     pattern: str
@@ -31,7 +19,6 @@ class PatternRule:
 
 @dataclass(slots=True)
 class AppConfig:
-    thresholds: Thresholds = field(default_factory=Thresholds)
     additional_temp_paths: list[str] = field(default_factory=list)
     additional_cache_paths: list[str] = field(default_factory=list)
     temp_patterns: list[PatternRule] = field(default_factory=list)
@@ -41,28 +28,24 @@ class AppConfig:
     follow_symlinks: bool = False
     max_depth: int | None = None
     scan_workers: int = 4
-    top_n: int = 15
+    summary_top_count: int = 15
     page_size: int = 100
     max_insights_per_category: int = 1000
     overview_top_folders: int = 100
-    page_jump_size: int = 10
+    scroll_step: int = 10
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "thresholds": {
-                "largeFileMb": self.thresholds.large_file_mb,
-                "largeDirMb": self.thresholds.large_dir_mb,
-            },
             "additionalTempPaths": self.additional_temp_paths,
             "additionalCachePaths": self.additional_cache_paths,
             "followSymlinks": self.follow_symlinks,
             "maxDepth": self.max_depth,
             "scanWorkers": self.scan_workers,
-            "topN": self.top_n,
+            "summaryTopCount": self.summary_top_count,
             "pageSize": self.page_size,
             "maxInsightsPerCategory": self.max_insights_per_category,
             "overviewTopFolders": self.overview_top_folders,
-            "pageJumpSize": self.page_jump_size,
+            "scrollStep": self.scroll_step,
             "tempPatterns": [_rule_to_dict(rule) for rule in self.temp_patterns],
             "cachePatterns": [_rule_to_dict(rule) for rule in self.cache_patterns],
             "buildArtifactPatterns": [
@@ -107,20 +90,9 @@ def _rule_from_dict(payload: dict[str, Any]) -> PatternRule:
 
 
 def from_dict(data: dict[str, Any], defaults: AppConfig) -> AppConfig:
-    thresholds = data.get("thresholds", {})
-    threshold_obj = Thresholds(
-        large_file_mb=int(
-            thresholds.get("largeFileMb", defaults.thresholds.large_file_mb)
-        ),
-        large_dir_mb=int(
-            thresholds.get("largeDirMb", defaults.thresholds.large_dir_mb)
-        ),
-    )
-
     max_depth_raw = data.get("maxDepth", defaults.max_depth)
 
     return AppConfig(
-        thresholds=threshold_obj,
         additional_temp_paths=[
             str(x)
             for x in data.get("additionalTempPaths", defaults.additional_temp_paths)
@@ -132,7 +104,9 @@ def from_dict(data: dict[str, Any], defaults: AppConfig) -> AppConfig:
         follow_symlinks=bool(data.get("followSymlinks", defaults.follow_symlinks)),
         max_depth=int(max_depth_raw) if max_depth_raw is not None else None,
         scan_workers=max(1, int(data.get("scanWorkers", defaults.scan_workers))),
-        top_n=max(1, int(data.get("topN", defaults.top_n))),
+        summary_top_count=max(
+            1, int(data.get("summaryTopCount", defaults.summary_top_count))
+        ),
         page_size=max(10, int(data.get("pageSize", defaults.page_size))),
         max_insights_per_category=max(
             10,
@@ -141,7 +115,7 @@ def from_dict(data: dict[str, Any], defaults: AppConfig) -> AppConfig:
         overview_top_folders=max(
             5, int(data.get("overviewTopFolders", defaults.overview_top_folders))
         ),
-        page_jump_size=max(1, int(data.get("pageJumpSize", defaults.page_jump_size))),
+        scroll_step=max(1, int(data.get("scrollStep", defaults.scroll_step))),
         temp_patterns=[_rule_from_dict(x) for x in data["tempPatterns"]]
         if "tempPatterns" in data
         else list(defaults.temp_patterns),

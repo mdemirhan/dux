@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from diskanalysis.config.schema import AppConfig, PatternRule, Thresholds
+from diskanalysis.config.schema import AppConfig, PatternRule
 from diskanalysis.models.enums import InsightCategory
 
 
@@ -635,7 +635,6 @@ def default_config() -> AppConfig:
     ]
 
     return AppConfig(
-        thresholds=Thresholds(),
         additional_temp_paths=[
             f"{home}/Library/Caches/TemporaryItems",
             f"{home}/.Trash",
@@ -648,9 +647,9 @@ def default_config() -> AppConfig:
         follow_symlinks=False,
         max_depth=None,
         scan_workers=4,
-        top_n=15,
+        summary_top_count=15,
         page_size=100,
         max_insights_per_category=1000,
         overview_top_folders=100,
-        page_jump_size=20,
+        scroll_step=20,
     )
