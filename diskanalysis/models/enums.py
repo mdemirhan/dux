@@ -12,4 +12,3 @@ class InsightCategory(str, Enum):
     TEMP = "temp"
     CACHE = "cache"
     BUILD_ARTIFACT = "build_artifact"
-    CUSTOM = "custom"

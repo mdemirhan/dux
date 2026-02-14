@@ -11,8 +11,6 @@ class PatternRule:
     name: str
     pattern: str
     category: InsightCategory
-    safe_to_delete: bool
-    recommendation: str
     apply_to: Literal["file", "dir", "both"] = "both"
     stop_recursion: bool = False
 
@@ -24,7 +22,6 @@ class AppConfig:
     temp_patterns: list[PatternRule] = field(default_factory=list)
     cache_patterns: list[PatternRule] = field(default_factory=list)
     build_artifact_patterns: list[PatternRule] = field(default_factory=list)
-    custom_patterns: list[PatternRule] = field(default_factory=list)
     follow_symlinks: bool = False
     max_depth: int | None = None
     scan_workers: int = 4
@@ -51,7 +48,6 @@ class AppConfig:
             "buildArtifactPatterns": [
                 _rule_to_dict(rule) for rule in self.build_artifact_patterns
             ],
-            "customPatterns": [_rule_to_dict(rule) for rule in self.custom_patterns],
         }
 
 
@@ -60,8 +56,6 @@ def _rule_to_dict(rule: PatternRule) -> dict[str, Any]:
         "name": rule.name,
         "pattern": rule.pattern,
         "category": rule.category.value,
-        "safeToDelete": rule.safe_to_delete,
-        "recommendation": rule.recommendation,
         "applyTo": rule.apply_to,
         "stopRecursion": rule.stop_recursion,
     }
@@ -82,8 +76,6 @@ def _rule_from_dict(payload: dict[str, Any]) -> PatternRule:
         name=str(payload["name"]),
         pattern=str(payload["pattern"]),
         category=InsightCategory(str(payload["category"])),
-        safe_to_delete=bool(payload.get("safeToDelete", False)),
-        recommendation=str(payload.get("recommendation", "Review before deleting.")),
         apply_to=_parse_apply_to(payload.get("applyTo", "both")),
         stop_recursion=bool(payload.get("stopRecursion", False)),
     )
@@ -127,7 +119,4 @@ def from_dict(data: dict[str, Any], defaults: AppConfig) -> AppConfig:
         ]
         if "buildArtifactPatterns" in data
         else list(defaults.build_artifact_patterns),
-        custom_patterns=[_rule_from_dict(x) for x in data["customPatterns"]]
-        if "customPatterns" in data
-        else list(defaults.custom_patterns),
     )

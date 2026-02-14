@@ -35,7 +35,6 @@ _CATEGORY_LABELS: dict[str, str] = {
     "temp": "Temp",
     "cache": "Cache",
     "build_artifact": "Build Artifact",
-    "custom": "Custom",
 }
 
 
@@ -800,7 +799,9 @@ class DiskAnalyzerApp(App[None]):
         if self._handle_global_key(key):
             return
         if key == "y":
-            self._yank(lambda row: shlex.quote(row.path) if row.path else shlex.quote(row.name))
+            self._yank(
+                lambda row: shlex.quote(row.path) if row.path else shlex.quote(row.name)
+            )
             return
         if key in {"Y", "shift+y"} or char == "Y":
             self._yank(lambda row: shlex.quote(row.name))

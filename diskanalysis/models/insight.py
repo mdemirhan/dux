@@ -10,9 +10,7 @@ class Insight:
     path: str
     size_bytes: int
     category: InsightCategory
-    safe_to_delete: bool
     summary: str
-    recommendation: str
     modified_ts: float
 
 

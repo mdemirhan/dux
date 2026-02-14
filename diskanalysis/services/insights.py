@@ -52,8 +52,6 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
                         name=f"Additional {category.value} path",
                         pattern=base,
                         category=category,
-                        safe_to_delete=category is InsightCategory.TEMP,
-                        recommendation="Review configured path and clean safely.",
                         apply_to="both",
                         stop_recursion=False,
                     ),
@@ -66,7 +64,6 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
             (config.temp_patterns, "temp"),
             (config.cache_patterns, "cache"),
             (config.build_artifact_patterns, "build"),
-            (config.custom_patterns, "custom"),
         ],
         additional_paths=additional_paths or None,
     )
@@ -157,9 +154,7 @@ def _insight_from_rule(node: ScanNode, rule: PatternRule) -> Insight:
         path=node.path,
         size_bytes=node.size_bytes,
         category=rule.category,
-        safe_to_delete=rule.safe_to_delete,
         summary=rule.name,
-        recommendation=rule.recommendation,
         modified_ts=node.modified_ts,
     )
 

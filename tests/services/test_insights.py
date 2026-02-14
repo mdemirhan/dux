@@ -3,7 +3,6 @@ from __future__ import annotations
 import time
 
 from diskanalysis.config.defaults import default_config
-from diskanalysis.config.schema import PatternRule
 from diskanalysis.models.enums import InsightCategory, NodeKind
 from diskanalysis.models.scan import ScanNode
 from diskanalysis.services.insights import generate_insights
@@ -91,25 +90,6 @@ def test_temp_and_cache_insights_generated() -> None:
     categories = {item.category for item in bundle.insights}
     assert InsightCategory.TEMP in categories
     assert InsightCategory.CACHE in categories
-
-
-def test_custom_pattern_detection() -> None:
-    config = default_config()
-    config.custom_patterns = [
-        PatternRule(
-            name="ISO",
-            pattern="**/*.iso",
-            category=InsightCategory.CUSTOM,
-            safe_to_delete=False,
-            recommendation="Review archives",
-            apply_to="file",
-            stop_recursion=False,
-        )
-    ]
-    node = _file("/root/images/archive.iso", size=1024)
-    bundle = generate_insights(_tree_with(node), config)
-
-    assert any(item.category is InsightCategory.CUSTOM for item in bundle.insights)
 
 
 def test_case_insensitive_matching() -> None:
