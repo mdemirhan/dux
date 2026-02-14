@@ -42,6 +42,10 @@ class AppConfig:
     max_depth: int | None = None
     scan_workers: int = 4
     top_n: int = 15
+    page_size: int = 100
+    max_insights_per_category: int = 1000
+    overview_top_folders: int = 100
+    page_jump_size: int = 10
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +59,10 @@ class AppConfig:
             "maxDepth": self.max_depth,
             "scanWorkers": self.scan_workers,
             "topN": self.top_n,
+            "pageSize": self.page_size,
+            "maxInsightsPerCategory": self.max_insights_per_category,
+            "overviewTopFolders": self.overview_top_folders,
+            "pageJumpSize": self.page_jump_size,
             "tempPatterns": [_rule_to_dict(rule) for rule in self.temp_patterns],
             "cachePatterns": [_rule_to_dict(rule) for rule in self.cache_patterns],
             "buildArtifactPatterns": [
@@ -125,6 +133,15 @@ def from_dict(data: dict[str, Any], defaults: AppConfig) -> AppConfig:
         max_depth=int(max_depth_raw) if max_depth_raw is not None else None,
         scan_workers=max(1, int(data.get("scanWorkers", defaults.scan_workers))),
         top_n=max(1, int(data.get("topN", defaults.top_n))),
+        page_size=max(10, int(data.get("pageSize", defaults.page_size))),
+        max_insights_per_category=max(
+            10,
+            int(data.get("maxInsightsPerCategory", defaults.max_insights_per_category)),
+        ),
+        overview_top_folders=max(
+            5, int(data.get("overviewTopFolders", defaults.overview_top_folders))
+        ),
+        page_jump_size=max(1, int(data.get("pageJumpSize", defaults.page_jump_size))),
         temp_patterns=[_rule_from_dict(x) for x in data["tempPatterns"]]
         if "tempPatterns" in data
         else list(defaults.temp_patterns),

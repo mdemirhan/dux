@@ -16,7 +16,6 @@ from diskanalysis.models.enums import InsightCategory, NodeKind
 from diskanalysis.models.insight import Insight, InsightBundle
 from diskanalysis.models.scan import ScanNode, ScanStats
 from diskanalysis.services.formatting import format_bytes, format_ts, relative_bar
-from diskanalysis.services.insights import MAX_INSIGHTS_PER_CATEGORY
 
 
 TABS = ["overview", "browse", "large_dir", "large_file", "temp"]
@@ -37,8 +36,6 @@ _CATEGORY_LABELS: dict[str, str] = {
     "build_artifact": "Build Artifact",
     "custom": "Custom",
 }
-
-TEMP_PAGE_SIZE = 100
 
 
 @dataclass(slots=True)
@@ -124,6 +121,11 @@ class DiskAnalyzerApp(App[None]):
         self.config = config
         self.current_view = initial_view if initial_view in TABS else "overview"
 
+        self._page_size = config.page_size
+        self._page_jump = config.page_jump_size
+        self._overview_top = config.overview_top_folders
+        self._max_insights = config.max_insights_per_category
+
         self.node_by_path: dict[str, ScanNode] = {}
         self.parent_by_path: dict[str, str] = {}
         self._index_tree(self.root)
@@ -137,9 +139,11 @@ class DiskAnalyzerApp(App[None]):
         self._rows_cache: dict[str, list[DisplayRow]] = {}
         self._view_shown_counts: dict[str, int] = {}
         self._view_total_counts: dict[str, int] = {}
-        self._temp_page_index = 0
-        self._temp_total_rows = 0
-        self._temp_all_rows_cache: list[DisplayRow] | None = None
+        self._page_index = 0
+        self._paged_total_rows = 0
+        self._paged_all_rows_cache: list[DisplayRow] | None = None
+        self._view_cursor: dict[str, int] = {}
+        self._view_scroll: dict[str, float] = {}
 
     def _index_tree(self, root: ScanNode) -> None:
         stack: list[tuple[ScanNode, str | None]] = [(root, None)]
@@ -181,10 +185,9 @@ class DiskAnalyzerApp(App[None]):
     def _invalidate_rows(self, view: str) -> None:
         self._rows_cache.pop(view, None)
         self._view_shown_counts.pop(view, None)
-        if view == "temp":
-            self._temp_all_rows_cache = None
-            self._temp_total_rows = 0
-            self._temp_page_index = 0
+        self._paged_all_rows_cache = None
+        self._paged_total_rows = 0
+        self._page_index = 0
 
     def _invalidate_browse_rows(self) -> None:
         self._invalidate_rows("browse")
@@ -273,11 +276,11 @@ class DiskAnalyzerApp(App[None]):
         cursor = min(total_rows, self.selected_index + 1)
 
         left = f"Row {cursor}/{total_rows}"
-        if self.current_view == "temp":
+        if self._paged_total_rows > self._page_size:
             total_pages = max(
-                1, (self._temp_total_rows + TEMP_PAGE_SIZE - 1) // TEMP_PAGE_SIZE
+                1, (self._paged_total_rows + self._page_size - 1) // self._page_size
             )
-            left += f" | Page {self._temp_page_index + 1}/{total_pages}"
+            left += f" | Page {self._page_index + 1}/{total_pages}"
         trimmed_text = self._trimmed_indicator(self.current_view)
         if trimmed_text:
             left += f" | {trimmed_text}"
@@ -285,7 +288,7 @@ class DiskAnalyzerApp(App[None]):
         hints = "q quit | ? help | Tab views | j/k move"
         if self.current_view == "browse":
             hints += " | h/l collapse-expand | Enter drill-in | Backspace drill-out"
-        if self.current_view == "temp":
+        if self._paged_total_rows > self._page_size:
             hints += " | \\[ prev | ] next"
 
         width = self.size.width
@@ -305,9 +308,9 @@ class DiskAnalyzerApp(App[None]):
 
     def _build_rows_for_current_view(self) -> list[DisplayRow]:
         if self.current_view == "temp":
-            rows = self._temp_rows()
+            rows = self._paged_rows()
             self._rows_cache[self.current_view] = rows
-            self._view_shown_counts[self.current_view] = self._temp_total_rows
+            self._view_shown_counts[self.current_view] = self._paged_total_rows
             return rows
 
         cached = self._rows_cache.get(self.current_view)
@@ -332,9 +335,9 @@ class DiskAnalyzerApp(App[None]):
             self._view_shown_counts[self.current_view] = len(rows)
         return rows
 
-    def _temp_rows(self) -> list[DisplayRow]:
-        if self._temp_all_rows_cache is None:
-            self._temp_all_rows_cache = self._insight_rows(
+    def _paged_rows(self) -> list[DisplayRow]:
+        if self._paged_all_rows_cache is None:
+            self._paged_all_rows_cache = self._insight_rows(
                 lambda i: (
                     i.category
                     in {
@@ -344,37 +347,33 @@ class DiskAnalyzerApp(App[None]):
                     }
                 )
             )
-            self._temp_total_rows = len(self._temp_all_rows_cache)
+            self._paged_total_rows = len(self._paged_all_rows_cache)
 
         total_pages = max(
-            1, (self._temp_total_rows + TEMP_PAGE_SIZE - 1) // TEMP_PAGE_SIZE
+            1, (self._paged_total_rows + self._page_size - 1) // self._page_size
         )
-        self._temp_page_index = max(0, min(self._temp_page_index, total_pages - 1))
-        start = self._temp_page_index * TEMP_PAGE_SIZE
-        end = start + TEMP_PAGE_SIZE
-        return self._temp_all_rows_cache[start:end]
+        self._page_index = max(0, min(self._page_index, total_pages - 1))
+        start = self._page_index * self._page_size
+        end = start + self._page_size
+        return self._paged_all_rows_cache[start:end]
 
-    def _next_temp_page(self) -> None:
-        if self.current_view != "temp":
-            return
+    def _next_page(self) -> None:
         total_pages = max(
-            1, (self._temp_total_rows + TEMP_PAGE_SIZE - 1) // TEMP_PAGE_SIZE
+            1, (self._paged_total_rows + self._page_size - 1) // self._page_size
         )
-        if self._temp_page_index >= total_pages - 1:
+        if self._page_index >= total_pages - 1:
             return
-        self._temp_page_index += 1
+        self._page_index += 1
         self.selected_index = 0
-        self._rows_cache.pop("temp", None)
+        self._rows_cache.pop(self.current_view, None)
         self._refresh_all()
 
-    def _prev_temp_page(self) -> None:
-        if self.current_view != "temp":
+    def _prev_page(self) -> None:
+        if self._page_index == 0:
             return
-        if self._temp_page_index == 0:
-            return
-        self._temp_page_index -= 1
+        self._page_index -= 1
         self.selected_index = 0
-        self._rows_cache.pop("temp", None)
+        self._rows_cache.pop(self.current_view, None)
         self._refresh_all()
 
     def _view_categories(self, view: str) -> tuple[InsightCategory, ...]:
@@ -409,7 +408,7 @@ class DiskAnalyzerApp(App[None]):
             return ""
 
         trimmed = any(
-            self.bundle.category_counts.get(cat, 0) > MAX_INSIGHTS_PER_CATEGORY
+            self.bundle.category_counts.get(cat, 0) > self._max_insights
             for cat in categories
         )
 
@@ -471,14 +470,14 @@ class DiskAnalyzerApp(App[None]):
             ),
             DisplayRow(
                 path="separator",
-                name="── Largest 50 folders ──",
+                name=f"── Largest {self._overview_top} folders ──",
                 size_bytes=0,
                 right="",
             ),
         ]
 
         top_dirs = heapq.nlargest(
-            50,
+            self._overview_top,
             (
                 n
                 for n in self.node_by_path.values()
@@ -553,13 +552,29 @@ class DiskAnalyzerApp(App[None]):
     def _set_view(self, view: str) -> None:
         if view not in TABS:
             return
+        # Save current view state before switching.
+        self._save_view_state()
         self.current_view = view
-        self.selected_index = 0
-        if view == "temp":
-            self._temp_page_index = 0
-            self._rows_cache.pop("temp", None)
+        # Restore saved state for the target view (defaults to top).
+        self.selected_index = self._view_cursor.get(view, 0)
+        self._rows_cache.pop(view, None)
         self.pending_g = False
         self._refresh_all()
+        # Restore scroll offset after table is rebuilt.
+        self._restore_scroll(view)
+
+    def _save_view_state(self) -> None:
+        """Persist cursor position and scroll offset for the current view."""
+        self._view_cursor[self.current_view] = self.selected_index
+        table = self.query_one("#content-table", DataTable)
+        self._view_scroll[self.current_view] = table.scroll_y
+
+    def _restore_scroll(self, view: str) -> None:
+        """Restore saved scroll offset for the given view."""
+        saved_y = self._view_scroll.get(view)
+        if saved_y is not None and saved_y > 0:
+            table = self.query_one("#content-table", DataTable)
+            table.scroll_y = saved_y
 
     def _move_selection(self, delta: int) -> None:
         if not self.rows:
@@ -731,10 +746,10 @@ class DiskAnalyzerApp(App[None]):
             self._move_selection(-1)
             return True
         if key in {"ctrl+d", "pagedown"}:
-            self._move_selection(10)
+            self._move_selection(self._page_jump)
             return True
         if key in {"ctrl+u", "pageup"}:
-            self._move_selection(-10)
+            self._move_selection(-self._page_jump)
             return True
         if key in {"home", "ctrl+home"}:
             self._move_top()
@@ -782,12 +797,12 @@ class DiskAnalyzerApp(App[None]):
             return
         if self._handle_navigation_key(key, char):
             return
-        if self.current_view == "temp":
+        if self._paged_total_rows > self._page_size:
             if key == "left_square_bracket" or char == "[":
-                self._prev_temp_page()
+                self._prev_page()
                 return
             if key == "right_square_bracket" or char == "]":
-                self._next_temp_page()
+                self._next_page()
                 return
 
         if self.current_view == "browse" and self._handle_browse_key(key):

@@ -649,4 +649,8 @@ def default_config() -> AppConfig:
         max_depth=None,
         scan_workers=4,
         top_n=15,
+        page_size=100,
+        max_insights_per_category=1000,
+        overview_top_folders=100,
+        page_jump_size=20,
     )

@@ -9,9 +9,6 @@ from diskanalysis.models.insight import Insight, InsightBundle
 from diskanalysis.models.scan import ScanNode, norm_sep
 from diskanalysis.services.patterns import CompiledRuleSet, compile_ruleset, match_all
 
-MAX_INSIGHTS_PER_CATEGORY = 1000
-
-
 # Heap entry: (size_bytes, path, Insight).  Using size as the key so the
 # smallest item sits at the top of the min-heap for efficient eviction.
 type _HeapEntry = tuple[int, str, Insight]
@@ -92,7 +89,7 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
         category_counts[cat] = category_counts.get(cat, 0) + 1
         category_sizes[cat] = category_sizes.get(cat, 0) + insight.size_bytes
         category_paths[cat].add(insight.path)
-        _heap_push(heaps[cat], seen[cat], insight, MAX_INSIGHTS_PER_CATEGORY)
+        _heap_push(heaps[cat], seen[cat], insight, config.max_insights_per_category)
 
     # --- thresholds ---
     large_file_bytes = config.thresholds.large_file_bytes
