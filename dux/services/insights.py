@@ -74,12 +74,14 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
 
     # --- aggregate counters (track *all* matches, not just top-K) ---
     category_counts: dict[InsightCategory, int] = {}
+    category_size_bytes: dict[InsightCategory, int] = {}
     category_disk_usage: dict[InsightCategory, int] = {}
     category_paths: dict[InsightCategory, set[str]] = {cat: set() for cat in InsightCategory}
 
     def _record(insight: Insight) -> None:
         cat = insight.category
         category_counts[cat] = category_counts.get(cat, 0) + 1
+        category_size_bytes[cat] = category_size_bytes.get(cat, 0) + insight.size_bytes
         category_disk_usage[cat] = category_disk_usage.get(cat, 0) + insight.disk_usage
         category_paths[cat].add(insight.path)
         _heap_push(heaps[cat], seen[cat], insight, config.max_insights_per_category)
@@ -140,6 +142,7 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
     return InsightBundle(
         insights=all_insights,
         category_counts=category_counts,
+        category_size_bytes=category_size_bytes,
         category_disk_usage=category_disk_usage,
         category_paths=category_paths,
     )

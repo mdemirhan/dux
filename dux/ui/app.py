@@ -487,12 +487,18 @@ class DuxApp(App[None]):
         p = pattern.lower()
         return [r for r in rows if p in r.name.lower() or p in r.path.lower()]
 
+    def _category_size_bytes(self, *categories: InsightCategory) -> int:
+        return sum(self.bundle.category_size_bytes.get(cat, 0) for cat in categories)
+
     def _category_disk_usage(self, *categories: InsightCategory) -> int:
         return sum(self.bundle.category_disk_usage.get(cat, 0) for cat in categories)
 
     def _overview_rows(self) -> list[DisplayRow]:
+        temp_sz = self._category_size_bytes(InsightCategory.TEMP)
         temp_du = self._category_disk_usage(InsightCategory.TEMP)
+        cache_sz = self._category_size_bytes(InsightCategory.CACHE)
         cache_du = self._category_disk_usage(InsightCategory.CACHE)
+        build_sz = self._category_size_bytes(InsightCategory.BUILD_ARTIFACT)
         build_du = self._category_disk_usage(InsightCategory.BUILD_ARTIFACT)
 
         rows: list[DisplayRow] = [
@@ -518,21 +524,21 @@ class DuxApp(App[None]):
             DisplayRow(
                 path="",
                 name=f"Temp: {format_bytes(temp_du)}",
-                size_bytes=0,
+                size_bytes=temp_sz,
                 detail="",
                 disk_usage=temp_du,
             ),
             DisplayRow(
                 path="",
                 name=f"Cache: {format_bytes(cache_du)}",
-                size_bytes=0,
+                size_bytes=cache_sz,
                 detail="",
                 disk_usage=cache_du,
             ),
             DisplayRow(
                 path="",
                 name=f"Build Artifacts: {format_bytes(build_du)}",
-                size_bytes=0,
+                size_bytes=build_sz,
                 detail="",
                 disk_usage=build_du,
             ),

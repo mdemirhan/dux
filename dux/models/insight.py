@@ -19,5 +19,6 @@ class Insight:
 class InsightBundle:
     insights: list[Insight]
     category_counts: dict[InsightCategory, int] = field(default_factory=dict)
+    category_size_bytes: dict[InsightCategory, int] = field(default_factory=dict)
     category_disk_usage: dict[InsightCategory, int] = field(default_factory=dict)
     category_paths: dict[InsightCategory, set[str]] = field(default_factory=dict)

@@ -8,7 +8,7 @@ A fast, interactive terminal disk usage analyzer for macOS and Linux. Scans dire
 
 - **Parallel scanning** with configurable thread pool (default 4 workers)
 - **Interactive TUI** with 5 views, vim keybindings, search/filter, pagination
-- **Composable CLI flags** — `--summary`, `--top-temp`, `--top-cache`, `--top-dirs`, `--top-files` each print their own table and can be freely combined
+- **Composable CLI flags** — `--top-temp`, `--top-cache`, `--top-dirs`, `--top-files` each print their own table and can be freely combined
 - **670+ built-in patterns** for detecting temp files, caches, and build artifacts across dozens of ecosystems (Node, Python, Rust, Go, JVM, Swift, C++, and more)
 - **Fully configurable** via JSON config with pattern overrides and custom paths
 - **Analysis-only** — never deletes, moves, or modifies your files
@@ -23,20 +23,23 @@ git clone https://github.com/mdemirhan/dux.git
 cd dux
 uv sync
 
-# Analyze current directory (interactive TUI)
+# Analyze current directory (summary table)
 uv run dux
 
 # Analyze a specific path
 uv run dux ~/src
 
-# Top-level size summary
+# Include logical file size column
 uv run dux -s ~/src
 
 # Largest temp/build artifacts
 uv run dux -t ~/src
 
 # Combine flags: summary + cache + temp
-uv run dux -s -c -t ~/src
+uv run dux -c -t ~/src
+
+# Interactive TUI
+uv run dux -i ~/src
 ```
 
 ## TUI Views
@@ -87,11 +90,12 @@ Switch views with `Tab`/`Shift+Tab` or press the shortcut key directly.
 uv run dux [PATH] [OPTIONS]
 ```
 
-Any `--top-*` or `--summary` flag triggers non-interactive output. Flags are composable — use multiple at once to print several tables.
+By default dux prints a CLI summary table. Use `--interactive` / `-i` to launch the TUI. The `--top-*` flags are composable — use multiple at once to print additional tables.
 
 | Option | Description |
 |--------|-------------|
-| `--summary` / `-s` | Top-level size breakdown with totals |
+| `--interactive` / `-i` | Launch interactive TUI |
+| `--show-size` / `-s` | Show logical file size column |
 | `--top-temp` / `-t` | Largest temp/build artifacts |
 | `--top-cache` / `-c` | Largest cache files/directories |
 | `--top-dirs` / `-d` | Largest directories |

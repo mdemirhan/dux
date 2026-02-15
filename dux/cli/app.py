@@ -128,7 +128,7 @@ def run(
     top_cache: Annotated[bool, typer.Option("--top-cache", "-c", help="Show largest cache files/directories.")] = False,
     top_dirs: Annotated[bool, typer.Option("--top-dirs", "-d", help="Show largest directories.")] = False,
     top_files: Annotated[bool, typer.Option("--top-files", "-f", help="Show largest files.")] = False,
-    summary: Annotated[bool, typer.Option("--summary", "-s", help="Show top-level size summary.")] = False,
+    interactive: Annotated[bool, typer.Option("--interactive", "-i", help="Launch interactive TUI.")] = False,
     sample_config: Annotated[bool, typer.Option("--sample-config", help="Print sample config JSON.")] = False,
     max_depth: Annotated[int | None, typer.Option("--max-depth", help="Max directory depth to scan.")] = None,
     workers: Annotated[int | None, typer.Option("--workers", "-w", help="Number of scan workers.")] = None,
@@ -140,7 +140,7 @@ def run(
     overview_dirs: Annotated[int | None, typer.Option("--overview-dirs", help="Top directories in overview.")] = None,
     scroll_step: Annotated[int | None, typer.Option("--scroll-step", help="Lines to jump on PgUp/PgDn.")] = None,
     page_size: Annotated[int | None, typer.Option("--page-size", help="Rows per page in TUI.")] = None,
-    show_size: Annotated[bool, typer.Option("--show-size", "-S", help="Show logical file size column.")] = False,
+    show_size: Annotated[bool, typer.Option("--show-size", "-s", help="Show logical file size column.")] = False,
 ) -> None:
     if sys.platform == "win32":
         console.print("[red]Windows support is not implemented yet.[/]")
@@ -189,33 +189,32 @@ def run(
     with console.status("[bold #8abeb7]Generating insights...[/]"):
         bundle = generate_insights(snapshot.root, config)
 
-    if summary or top_temp or top_cache or top_dirs or top_files:
-        root_prefix = snapshot.root.path.rstrip("/") + "/"
-        if snapshot.stats.access_errors:
-            console.print(f"[red]{snapshot.stats.access_errors:,} access errors during scan[/red]")
-        if summary:
-            render_summary(console, snapshot.root, snapshot.stats, root_prefix, show_size=show_size)
-        render_focused_summary(
-            console,
-            snapshot.root,
-            bundle,
-            config.top_count,
-            root_prefix,
-            top_temp=top_temp,
-            top_cache=top_cache,
-            top_dirs=top_dirs,
-            top_files=top_files,
+    if interactive:
+        DuxApp(
+            root=snapshot.root,
+            stats=snapshot.stats,
+            bundle=bundle,
+            config=config,
             show_size=show_size,
-        )
+        ).run()
         raise typer.Exit(0)
 
-    DuxApp(
-        root=snapshot.root,
-        stats=snapshot.stats,
-        bundle=bundle,
-        config=config,
+    root_prefix = snapshot.root.path.rstrip("/") + "/"
+    if snapshot.stats.access_errors:
+        console.print(f"[red]{snapshot.stats.access_errors:,} access errors during scan[/red]")
+    render_summary(console, snapshot.root, snapshot.stats, root_prefix, show_size=show_size)
+    render_focused_summary(
+        console,
+        snapshot.root,
+        bundle,
+        config.top_count,
+        root_prefix,
+        top_temp=top_temp,
+        top_cache=top_cache,
+        top_dirs=top_dirs,
+        top_files=top_files,
         show_size=show_size,
-    ).run()
+    )
 
 
 def cli() -> None:
