@@ -1,6 +1,6 @@
 # dux
 
-A fast, interactive terminal disk usage analyzer for macOS and Linux. Scans directories in parallel, categorizes files (temp, cache, build artifacts), and presents results in a rich TUI with vim-style navigation.
+A fast terminal disk usage analyzer for macOS and Linux. Scans directories in parallel, categorizes files (temp, cache, build artifacts), and presents results as CLI tables or an interactive TUI with vim-style navigation.
 
 > **100% AI-written.** The vast majority of this codebase was written by Claude (Anthropic), with contributions from Codex (OpenAI). Human involvement was limited to directing, reviewing, and benchmarking.
 
@@ -48,8 +48,8 @@ Switch views with `Tab`/`Shift+Tab` or press the shortcut key directly.
 
 | Key | View | Description |
 |-----|------|-------------|
-| `o` | **Overview** | Total size, file/dir counts, temp/cache/build totals, largest directories |
-| `b` | **Browse** | Expandable directory tree with size bars and timestamps |
+| `o` | **Overview** | Total disk usage, file/dir counts, temp/cache/build totals, largest directories |
+| `b` | **Browse** | Expandable directory tree with disk usage bars |
 | `d` | **Directories by Size** | Paginated list of largest directories |
 | `f` | **Files by Size** | Paginated list of largest individual files |
 | `t` | **Temporary Files** | All detected temp, cache, and build artifact items |

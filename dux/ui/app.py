@@ -297,7 +297,8 @@ class DuxApp(App[None]):
         # Each DataTable column adds ~2 chars of cell padding on top of its width.
         extra = (col_w + 2) if self._show_size else 0
 
-        if self.current_view == "temp":
+        is_temp = self.current_view == "temp"
+        if is_temp:
             name_w = max(20, self.size.width - extra - col_w - type_w - cat_w - 16)
             table.add_column("NAME", width=name_w)
             if self._show_size:
@@ -305,13 +306,6 @@ class DuxApp(App[None]):
             table.add_column("DISK", width=col_w)
             table.add_column("TYPE", width=type_w)
             table.add_column("CATEGORY", width=cat_w)
-        elif self.current_view == "browse":
-            name_w = max(20, self.size.width - extra - col_w - bar_w - 12)
-            table.add_column("NAME", width=name_w)
-            if self._show_size:
-                table.add_column("SIZE", width=col_w)
-            table.add_column("DISK", width=col_w)
-            table.add_column("BAR", width=bar_w)
         else:
             name_w = max(20, self.size.width - extra - col_w - bar_w - 12)
             table.add_column("NAME", width=name_w)
@@ -328,30 +322,18 @@ class DuxApp(App[None]):
             1,
             self.rows[0].disk_usage if self.current_view == "browse" else self.root.disk_usage,
         )
-        is_temp = self.current_view == "temp"
-        is_browse = self.current_view == "browse"
         for row in self.rows:
             disk_text = format_bytes(row.disk_usage) if row.disk_usage > 0 else ""
             size_text = format_bytes(row.size_bytes) if row.size_bytes > 0 else ""
-            bar_text = relative_bar(row.disk_usage, total, 18) if row.disk_usage > 0 else ""
+            cells: list[str] = [row.name]
+            if self._show_size:
+                cells.append(size_text)
             if is_temp:
-                cells: list[str] = [row.name]
-                if self._show_size:
-                    cells.append(size_text)
                 cells.extend([disk_text, row.type_label, row.detail])
-                table.add_row(*cells)
-            elif is_browse:
-                cells = [row.name]
-                if self._show_size:
-                    cells.append(size_text)
-                cells.extend([disk_text, bar_text])
-                table.add_row(*cells)
             else:
-                cells = [row.name]
-                if self._show_size:
-                    cells.append(size_text)
+                bar_text = relative_bar(row.disk_usage, total, 18) if row.disk_usage > 0 else ""
                 cells.extend([disk_text, bar_text])
-                table.add_row(*cells)
+            table.add_row(*cells)
 
         self.selected_index = max(0, min(self.selected_index, len(self.rows) - 1))
         table.move_cursor(row=self.selected_index, animate=False)
