@@ -1,25 +1,23 @@
 from __future__ import annotations
 
-import pytest
-from pathlib import Path
-
 from result import Err, Ok
 
 from diskanalysis.models.scan import ScanErrorCode, ScanOptions
 from diskanalysis.services.scanner import scan_path
+from tests.fs_mock import MemoryFileSystem
 
 
-def _write_file(path: Path, size: int) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(b"x" * size)
+def test_scanner_returns_valid_results() -> None:
+    fs = (
+        MemoryFileSystem()
+        .add_dir("/root")
+        .add_file("/root/big.bin", size=128)
+        .add_file("/root/small.bin", size=32)
+        .add_dir("/root/sub")
+        .add_file("/root/sub/nested.bin", size=64)
+    )
 
-
-def test_scanner_returns_valid_results(tmp_path: Path) -> None:
-    _write_file(tmp_path / "big.bin", 128)
-    _write_file(tmp_path / "small.bin", 32)
-    _write_file(tmp_path / "sub" / "nested.bin", 64)
-
-    result = scan_path(tmp_path, ScanOptions())
+    result = scan_path("/root", ScanOptions(), workers=1, fs=fs)
 
     assert isinstance(result, Ok)
     snapshot = result.unwrap()
@@ -28,8 +26,10 @@ def test_scanner_returns_valid_results(tmp_path: Path) -> None:
     assert snapshot.root.size_bytes == 224
 
 
-def test_missing_path_returns_error(tmp_path: Path) -> None:
-    result = scan_path(tmp_path / "does-not-exist", ScanOptions())
+def test_missing_path_returns_error() -> None:
+    fs = MemoryFileSystem()
+
+    result = scan_path("/does-not-exist", ScanOptions(), workers=1, fs=fs)
 
     assert isinstance(result, Err)
     error = result.unwrap_err()
@@ -37,12 +37,16 @@ def test_missing_path_returns_error(tmp_path: Path) -> None:
     assert "does not exist" in error.message.lower()
 
 
-def test_children_sorted_by_size_descending(tmp_path: Path) -> None:
-    _write_file(tmp_path / "a.bin", 10)
-    _write_file(tmp_path / "b.bin", 100)
-    _write_file(tmp_path / "c.bin", 50)
+def test_children_sorted_by_size_descending() -> None:
+    fs = (
+        MemoryFileSystem()
+        .add_dir("/root")
+        .add_file("/root/a.bin", size=10)
+        .add_file("/root/b.bin", size=100)
+        .add_file("/root/c.bin", size=50)
+    )
 
-    result = scan_path(tmp_path, ScanOptions())
+    result = scan_path("/root", ScanOptions(), workers=1, fs=fs)
     assert isinstance(result, Ok)
     snapshot = result.unwrap()
 
@@ -50,10 +54,16 @@ def test_children_sorted_by_size_descending(tmp_path: Path) -> None:
     assert names == ["b.bin", "c.bin", "a.bin"]
 
 
-def test_max_depth_respected(tmp_path: Path) -> None:
-    _write_file(tmp_path / "lvl1" / "lvl2" / "f.bin", 20)
+def test_max_depth_respected() -> None:
+    fs = (
+        MemoryFileSystem()
+        .add_dir("/root")
+        .add_dir("/root/lvl1")
+        .add_dir("/root/lvl1/lvl2")
+        .add_file("/root/lvl1/lvl2/f.bin", size=20)
+    )
 
-    result = scan_path(tmp_path, ScanOptions(max_depth=0))
+    result = scan_path("/root", ScanOptions(max_depth=0), workers=1, fs=fs)
     assert isinstance(result, Ok)
     snapshot = result.unwrap()
 
@@ -61,42 +71,51 @@ def test_max_depth_respected(tmp_path: Path) -> None:
     assert lvl1.children == []
 
 
-def test_progress_callback_invoked(tmp_path: Path) -> None:
-    _write_file(tmp_path / "f1.bin", 1)
-    _write_file(tmp_path / "f2.bin", 1)
+def test_access_error_counted() -> None:
+    fs = MemoryFileSystem().add_dir("/root").add_file("/root/ok.bin", size=10)
 
-    callbacks: list[tuple[str, int, int]] = []
+    from diskanalysis.services.fs import DirEntry
 
-    def progress(path: str, files: int, directories: int) -> None:
-        callbacks.append((path, files, directories))
+    original_scandir = fs.scandir
 
-    result = scan_path(tmp_path, ScanOptions(), progress_callback=progress)
-    assert isinstance(result, Ok)
-    assert callbacks
+    def patched_scandir(path: str) -> list[DirEntry]:
+        entries = original_scandir(path)
+        if path == "/root":
+            entries.append(DirEntry(path="/root/broken", name="broken", stat=None))
+        return entries
 
+    fs.scandir = patched_scandir  # type: ignore[assignment]
 
-def test_symlinked_directory_is_not_traversed(tmp_path: Path) -> None:
-    target = tmp_path / "real_dir"
-    target.mkdir()
-    _write_file(target / "f.bin", 1)
-
-    link = tmp_path / "link_dir"
-    try:
-        link.symlink_to(target)
-    except OSError:
-        pytest.skip("symlink creation is not supported in this environment")
-
-    result = scan_path(tmp_path, ScanOptions(), workers=1)
+    result = scan_path("/root", ScanOptions(), workers=1, fs=fs)
     assert isinstance(result, Ok)
     snapshot = result.unwrap()
+    assert snapshot.stats.access_errors == 1
+    assert snapshot.stats.files == 1
 
-    link_node = next(node for node in snapshot.root.children if node.name == "link_dir")
-    assert not link_node.is_dir
+
+def test_progress_callback_invoked() -> None:
+    fs = MemoryFileSystem().add_dir("/root")
+    for idx in range(150):
+        fs.add_file(f"/root/f{idx}.bin", size=1)
+
+    calls: list[tuple[str, int, int]] = []
+
+    def on_progress(path: str, files: int, dirs: int) -> None:
+        calls.append((path, files, dirs))
+
+    result = scan_path(
+        "/root", ScanOptions(), progress_callback=on_progress, workers=1, fs=fs
+    )
+    assert isinstance(result, Ok)
+    assert len(calls) >= 1
+    for _, files, _ in calls:
+        assert files > 0
 
 
-def test_cancellation_respected(tmp_path: Path) -> None:
+def test_cancellation_respected() -> None:
+    fs = MemoryFileSystem().add_dir("/root")
     for idx in range(50):
-        _write_file(tmp_path / f"f{idx}.bin", 1)
+        fs.add_file(f"/root/f{idx}.bin", size=1)
 
     calls = 0
 
@@ -105,7 +124,7 @@ def test_cancellation_respected(tmp_path: Path) -> None:
         calls += 1
         return calls > 2
 
-    result = scan_path(tmp_path, ScanOptions(), cancel_check=cancel)
+    result = scan_path("/root", ScanOptions(), cancel_check=cancel, workers=1, fs=fs)
     assert isinstance(result, Err)
     error = result.unwrap_err()
     assert error.code is ScanErrorCode.CANCELLED

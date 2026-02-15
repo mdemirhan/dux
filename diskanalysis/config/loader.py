@@ -1,23 +1,25 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from result import Err, Ok, Result
 
 from diskanalysis.config.defaults import default_config
 from diskanalysis.config.schema import AppConfig, from_dict
+from diskanalysis.services.fs import DEFAULT_FS, FileSystem
 
-CONFIG_PATH = Path("~/.config/diskanalysis/config.json").expanduser()
+CONFIG_PATH = "~/.config/diskanalysis/config.json"
 
 
-def load_config(path: Path | None = None) -> Result[AppConfig, str]:
-    resolved = path or CONFIG_PATH
-    if not resolved.exists():
+def load_config(
+    path: str | None = None, fs: FileSystem = DEFAULT_FS
+) -> Result[AppConfig, str]:
+    resolved = path or fs.expanduser(CONFIG_PATH)
+    if not fs.exists(resolved):
         return Ok(default_config())
 
     try:
-        payload = json.loads(resolved.read_text(encoding="utf-8"))
+        payload = json.loads(fs.read_text(resolved))
         if not isinstance(payload, dict):
             return Err(f"Config at {resolved} must be a JSON object.")
         return Ok(from_dict(payload, default_config()))

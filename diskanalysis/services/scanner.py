@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import os
 import queue
-import stat as statmod
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 
 from result import Err, Ok
 
+from diskanalysis.services.fs import DEFAULT_FS, FileSystem
 from diskanalysis.models.enums import NodeKind
 from diskanalysis.models.scan import (
     CancelCheck,
@@ -50,20 +49,21 @@ def scan_path(
     progress_callback: ProgressCallback | None = None,
     cancel_check: CancelCheck | None = None,
     workers: int = 8,
+    fs: FileSystem = DEFAULT_FS,
 ) -> ScanResult:
-    root_path = Path(path).expanduser()
-    if not root_path.exists():
+    expanded = fs.expanduser(str(path))
+    if not fs.exists(expanded):
         return Err(
             ScanError(
                 code=ScanErrorCode.NOT_FOUND,
-                path=str(root_path),
+                path=expanded,
                 message="Path does not exist",
             )
         )
 
-    resolved_root = str(root_path.absolute())
+    resolved_root = fs.absolute(expanded)
     try:
-        root_stat = root_path.stat(follow_symlinks=False)
+        root_stat = fs.stat(resolved_root)
     except OSError as exc:
         return Err(
             ScanError(
@@ -72,7 +72,7 @@ def scan_path(
                 message=f"Cannot stat root: {exc}",
             )
         )
-    if not statmod.S_ISDIR(root_stat.st_mode):
+    if not root_stat.is_dir:
         return Err(
             ScanError(
                 code=ScanErrorCode.NOT_DIRECTORY,
@@ -81,12 +81,13 @@ def scan_path(
             )
         )
 
+    root_name = resolved_root.rsplit("/", 1)[-1] or resolved_root
     root_node = ScanNode(
         path=resolved_root,
-        name=root_path.name or resolved_root,
+        name=root_name,
         kind=NodeKind.DIRECTORY,
         size_bytes=0,
-        modified_ts=root_stat.st_mtime,
+        modified_ts=root_stat.mtime,
         children=[],
     )
 
@@ -139,38 +140,36 @@ def scan_path(
                 continue
 
             try:
-                with os.scandir(task.node.path) as entries:
-                    for entry in entries:
-                        if _is_cancelled():
-                            break
+                for entry in fs.scandir(task.node.path):
+                    if _is_cancelled():
+                        break
 
-                        try:
-                            stat_result = entry.stat(follow_symlinks=False)
-                        except OSError:
-                            local_errors += 1
-                            continue
+                    st = entry.stat
+                    if st is None:
+                        local_errors += 1
+                        continue
 
-                        is_dir = statmod.S_ISDIR(stat_result.st_mode)
-                        node = ScanNode(
-                            path=entry.path,
-                            name=entry.name,
-                            kind=NodeKind.DIRECTORY if is_dir else NodeKind.FILE,
-                            size_bytes=0 if is_dir else stat_result.st_size,
-                            modified_ts=stat_result.st_mtime,
-                            children=[],
+                    node = ScanNode(
+                        path=entry.path,
+                        name=entry.name,
+                        kind=NodeKind.DIRECTORY if st.is_dir else NodeKind.FILE,
+                        size_bytes=0 if st.is_dir else st.size,
+                        modified_ts=st.mtime,
+                        children=[],
+                    )
+                    task.node.children.append(node)
+
+                    if st.is_dir:
+                        local_dirs += 1
+                        within_depth = (
+                            options.max_depth is None or task.depth < options.max_depth
                         )
-                        task.node.children.append(node)
+                        if within_depth:
+                            q.put(_Task(node, task.depth + 1))
+                    else:
+                        local_files += 1
 
-                        if is_dir:
-                            local_dirs += 1
-                            within_depth = (
-                                options.max_depth is None
-                                or task.depth < options.max_depth
-                            )
-                            if within_depth:
-                                q.put(_Task(node, task.depth + 1))
-                        else:
-                            local_files += 1
+                    if (local_dirs + local_files) % 100 == 0:
                         emit_progress(node.path, local_files, local_dirs)
             except OSError:
                 local_errors += 1
