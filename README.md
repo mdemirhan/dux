@@ -6,12 +6,12 @@ A fast, interactive terminal disk usage analyzer for macOS and Linux. Scans dire
 
 ## Features
 
-- **Parallel scanning** with configurable thread pool (default 8 workers)
+- **Parallel scanning** with configurable thread pool (default 4 workers)
 - **Interactive TUI** with 5 views, vim keybindings, search/filter, pagination
-- **Non-interactive CLI summary** mode for scripts and quick checks
+- **Composable CLI flags** — `--summary`, `--top-temp`, `--top-cache`, `--top-dirs`, `--top-files` each print their own table and can be freely combined
 - **670+ built-in patterns** for detecting temp files, caches, and build artifacts across dozens of ecosystems (Node, Python, Rust, Go, JVM, Swift, C++, and more)
 - **Fully configurable** via JSON config with pattern overrides and custom paths
-- **Analysis-only** - never deletes, moves, or modifies your files
+- **Analysis-only** — never deletes, moves, or modifies your files
 
 ## Quick Start
 
@@ -30,13 +30,13 @@ uv run dux
 uv run dux ~/src
 
 # Top-level size summary
-uv run dux --summary ~/src
-
-# Largest cache files/directories
-uv run dux --top-cache ~/src
+uv run dux -s ~/src
 
 # Largest temp/build artifacts
-uv run dux --top-temp ~/src
+uv run dux -t ~/src
+
+# Combine flags: summary + cache + temp
+uv run dux -s -c -t ~/src
 ```
 
 ## TUI Views
@@ -87,16 +87,21 @@ Switch views with `Tab`/`Shift+Tab` or press the shortcut key directly.
 uv run dux [PATH] [OPTIONS]
 ```
 
+Any `--top-*` or `--summary` flag triggers non-interactive output. Flags are composable — use multiple at once to print several tables.
+
 | Option | Description |
 |--------|-------------|
-| `--summary` / `-s` | Show top-level size summary |
-| `--top-temp` / `-t` | Show largest temp/build artifacts |
-| `--top-cache` / `-c` | Show largest cache files/directories |
-| `--top-dirs` / `-d` | Show largest directories |
-| `--top-files` / `-f` | Show largest files |
-| `--workers` / `-w` | Number of scan threads (default: from config) |
+| `--summary` / `-s` | Top-level size breakdown with totals |
+| `--top-temp` / `-t` | Largest temp/build artifacts |
+| `--top-cache` / `-c` | Largest cache files/directories |
+| `--top-dirs` / `-d` | Largest directories |
+| `--top-files` / `-f` | Largest files |
+| `--top` | Number of items in `--top-*` views (default: 15) |
+| `--workers` / `-w` | Number of scan threads (default: 4) |
 | `--max-depth` | Maximum directory depth to scan |
-| `--top` | Number of items in summary output |
+| `--max-insights` | Max insights per category |
+| `--overview-dirs` | Top directories shown in TUI overview |
+| `--scroll-step` | Lines to jump on PgUp/PgDn in TUI |
 | `--page-size` | Rows per page in TUI |
 | `--sample-config` | Print full sample config and exit |
 
@@ -116,10 +121,11 @@ Key settings:
 {
   "scanWorkers": 4,
   "maxDepth": null,
+  "topCount": 15,
   "pageSize": 100,
   "overviewTopDirs": 100,
   "scrollStep": 20,
-  "topCount": 15,
+  "maxInsightsPerCategory": 1000,
   "additionalTempPaths": [],
   "additionalCachePaths": [],
   "tempPatterns": [...],
