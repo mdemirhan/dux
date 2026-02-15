@@ -38,9 +38,9 @@ def _finalize_sizes(root: ScanNode) -> None:
         stack.append(node)
         visit.extend(node.children)
     for node in reversed(stack):
-        total = sum(child.size_bytes for child in node.children)
-        node.children.sort(key=lambda x: x.size_bytes, reverse=True)
-        node.size_bytes = total
+        node.size_bytes = sum(child.size_bytes for child in node.children)
+        node.disk_usage = sum(child.disk_usage for child in node.children)
+        node.children.sort(key=lambda x: x.disk_usage, reverse=True)
 
 
 def scan_path(
@@ -87,7 +87,7 @@ def scan_path(
         name=root_name,
         kind=NodeKind.DIRECTORY,
         size_bytes=0,
-        modified_ts=root_stat.mtime,
+        disk_usage=0,
         children=[],
     )
 
@@ -154,7 +154,7 @@ def scan_path(
                         name=entry.name,
                         kind=NodeKind.DIRECTORY if st.is_dir else NodeKind.FILE,
                         size_bytes=0 if st.is_dir else st.size,
-                        modified_ts=st.mtime,
+                        disk_usage=0 if st.is_dir else st.disk_usage,
                         children=[],
                     )
                     task.node.children.append(node)

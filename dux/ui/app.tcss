@@ -31,7 +31,6 @@ Screen {
 #content-table {
     background: #1d1f21;
     color: #c5c8c6;
-    border: tall #373b41;
     height: 1fr;
 }
 

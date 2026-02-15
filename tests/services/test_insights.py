@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import time
-
 from dux.config.defaults import default_config
 from dux.models.enums import InsightCategory, NodeKind
 from dux.models.scan import ScanNode
@@ -10,23 +8,24 @@ from dux.services.insights import generate_insights
 
 def _tree_with(*children: ScanNode) -> ScanNode:
     total = sum(child.size_bytes for child in children)
+    disk_total = sum(child.disk_usage for child in children)
     return ScanNode(
         path="/root",
         name="root",
         kind=NodeKind.DIRECTORY,
         size_bytes=total,
-        modified_ts=time.time(),
+        disk_usage=disk_total,
         children=list(children),
     )
 
 
-def _file(path: str, size: int, modified: float | None = None) -> ScanNode:
+def _file(path: str, size: int) -> ScanNode:
     return ScanNode(
         path=path,
         name=path.rsplit("/", 1)[-1],
         kind=NodeKind.FILE,
         size_bytes=size,
-        modified_ts=modified or time.time(),
+        disk_usage=size,
         children=[],
     )
 
@@ -37,7 +36,7 @@ def _dir(path: str, size: int, *children: ScanNode) -> ScanNode:
         name=path.rsplit("/", 1)[-1],
         kind=NodeKind.DIRECTORY,
         size_bytes=size,
-        modified_ts=time.time(),
+        disk_usage=size,
         children=list(children),
     )
 

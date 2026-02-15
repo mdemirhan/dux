@@ -19,7 +19,7 @@ class ScanNode:
     name: str
     kind: NodeKind
     size_bytes: int
-    modified_ts: float
+    disk_usage: int
     children: list[ScanNode] = field(default_factory=list)
 
     @property

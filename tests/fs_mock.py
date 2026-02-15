@@ -10,32 +10,37 @@ from dux.services.fs import DirEntry, StatResult
 class _MockEntry:
     is_dir: bool
     size: int
-    mtime: float
     content: str
+    disk_usage: int = 0
 
 
 class MemoryFileSystem:
     def __init__(self) -> None:
         self._entries: dict[str, _MockEntry] = {}
 
-    def add_dir(self, path: str, mtime: float = 0.0) -> MemoryFileSystem:
-        self._entries[self._normalize(path)] = _MockEntry(is_dir=True, size=0, mtime=mtime, content="")
+    def add_dir(self, path: str) -> MemoryFileSystem:
+        self._entries[self._normalize(path)] = _MockEntry(is_dir=True, size=0, content="")
         return self
 
     def add_file(
         self,
         path: str,
         size: int = 0,
-        mtime: float = 0.0,
         content: str = "",
+        disk_usage: int | None = None,
     ) -> MemoryFileSystem:
         key = self._normalize(path)
         # auto-create parent dirs
         for parent in reversed(PurePosixPath(key).parents):
             pk = str(parent)
             if pk not in self._entries:
-                self._entries[pk] = _MockEntry(is_dir=True, size=0, mtime=0.0, content="")
-        self._entries[key] = _MockEntry(is_dir=False, size=size, mtime=mtime, content=content)
+                self._entries[pk] = _MockEntry(is_dir=True, size=0, content="")
+        self._entries[key] = _MockEntry(
+            is_dir=False,
+            size=size,
+            content=content,
+            disk_usage=disk_usage if disk_usage is not None else size,
+        )
         return self
 
     def expanduser(self, path: str) -> str:
@@ -52,7 +57,7 @@ class MemoryFileSystem:
         entry = self._entries.get(key)
         if entry is None:
             raise OSError(f"No such file or directory: '{key}'")
-        return StatResult(size=entry.size, mtime=entry.mtime, is_dir=entry.is_dir)
+        return StatResult(size=entry.size, is_dir=entry.is_dir, disk_usage=entry.disk_usage)
 
     def read_text(self, path: str, encoding: str = "utf-8") -> str:
         key = self._normalize(path)
@@ -85,8 +90,8 @@ class MemoryFileSystem:
                 st = (
                     StatResult(
                         size=child_entry.size,
-                        mtime=child_entry.mtime,
                         is_dir=child_entry.is_dir,
+                        disk_usage=child_entry.disk_usage,
                     )
                     if child_entry is not None
                     else None

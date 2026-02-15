@@ -17,7 +17,7 @@ from dux.config.schema import AppConfig
 from dux.models.enums import InsightCategory, NodeKind
 from dux.models.insight import Insight, InsightBundle
 from dux.models.scan import ScanNode, ScanStats
-from dux.services.formatting import format_bytes, format_ts, relative_bar
+from dux.services.formatting import format_bytes, relative_bar
 from dux.services.tree import top_nodes
 
 
@@ -45,6 +45,7 @@ class DisplayRow:
     size_bytes: int
     detail: str
     type_label: str = ""
+    disk_usage: int = 0
 
 
 _PAGED_VIEWS = {"temp", "large_dir", "large_file"}
@@ -190,12 +191,14 @@ class DuxApp(App[None]):
         bundle: InsightBundle,
         config: AppConfig,
         initial_view: str = "overview",
+        show_size: bool = False,
     ) -> None:
         super().__init__()
         self.root = root
         self.stats = stats
         self.bundle = bundle
         self.config = config
+        self._show_size = show_size
         self.current_view = initial_view if initial_view in TABS else "overview"
 
         self._page_size = config.page_size
@@ -286,27 +289,35 @@ class DuxApp(App[None]):
         table = self.query_one("#content-table", DataTable)
         table.clear(columns=True)
 
-        size_w = 12
+        col_w = 12
         bar_w = 20
         type_w = 8
-        right_w = 16
+        cat_w = 16
+
+        # Each DataTable column adds ~2 chars of cell padding on top of its width.
+        extra = (col_w + 2) if self._show_size else 0
 
         if self.current_view == "temp":
-            name_w = max(20, self.size.width - size_w - type_w - right_w - 16)
+            name_w = max(20, self.size.width - extra - col_w - type_w - cat_w - 16)
             table.add_column("NAME", width=name_w)
-            table.add_column("SIZE", width=size_w)
+            if self._show_size:
+                table.add_column("SIZE", width=col_w)
+            table.add_column("DISK", width=col_w)
             table.add_column("TYPE", width=type_w)
-            table.add_column("CATEGORY", width=right_w)
+            table.add_column("CATEGORY", width=cat_w)
         elif self.current_view == "browse":
-            name_w = max(20, self.size.width - size_w - bar_w - right_w - 16)
+            name_w = max(20, self.size.width - extra - col_w - bar_w - 12)
             table.add_column("NAME", width=name_w)
-            table.add_column("SIZE", width=size_w)
+            if self._show_size:
+                table.add_column("SIZE", width=col_w)
+            table.add_column("DISK", width=col_w)
             table.add_column("BAR", width=bar_w)
-            table.add_column("MODIFIED", width=right_w)
         else:
-            name_w = max(20, self.size.width - size_w - bar_w - 12)
+            name_w = max(20, self.size.width - extra - col_w - bar_w - 12)
             table.add_column("NAME", width=name_w)
-            table.add_column("SIZE", width=size_w)
+            if self._show_size:
+                table.add_column("SIZE", width=col_w)
+            table.add_column("DISK", width=col_w)
             table.add_column("BAR", width=bar_w)
 
         self.rows = self._build_rows_for_current_view()
@@ -315,19 +326,32 @@ class DuxApp(App[None]):
 
         total = max(
             1,
-            self.rows[0].size_bytes if self.current_view == "browse" else self.root.size_bytes,
+            self.rows[0].disk_usage if self.current_view == "browse" else self.root.disk_usage,
         )
         is_temp = self.current_view == "temp"
         is_browse = self.current_view == "browse"
         for row in self.rows:
+            disk_text = format_bytes(row.disk_usage) if row.disk_usage > 0 else ""
             size_text = format_bytes(row.size_bytes) if row.size_bytes > 0 else ""
-            bar_text = relative_bar(row.size_bytes, total, 18) if row.size_bytes > 0 else ""
+            bar_text = relative_bar(row.disk_usage, total, 18) if row.disk_usage > 0 else ""
             if is_temp:
-                table.add_row(row.name, size_text, row.type_label, row.detail)
+                cells: list[str] = [row.name]
+                if self._show_size:
+                    cells.append(size_text)
+                cells.extend([disk_text, row.type_label, row.detail])
+                table.add_row(*cells)
             elif is_browse:
-                table.add_row(row.name, size_text, bar_text, row.detail)
+                cells = [row.name]
+                if self._show_size:
+                    cells.append(size_text)
+                cells.extend([disk_text, bar_text])
+                table.add_row(*cells)
             else:
-                table.add_row(row.name, size_text, bar_text)
+                cells = [row.name]
+                if self._show_size:
+                    cells.append(size_text)
+                cells.extend([disk_text, bar_text])
+                table.add_row(*cells)
 
         self.selected_index = max(0, min(self.selected_index, len(self.rows) - 1))
         table.move_cursor(row=self.selected_index, animate=False)
@@ -463,20 +487,21 @@ class DuxApp(App[None]):
         p = pattern.lower()
         return [r for r in rows if p in r.name.lower() or p in r.path.lower()]
 
-    def _category_size(self, *categories: InsightCategory) -> int:
-        return sum(self.bundle.category_sizes.get(cat, 0) for cat in categories)
+    def _category_disk_usage(self, *categories: InsightCategory) -> int:
+        return sum(self.bundle.category_disk_usage.get(cat, 0) for cat in categories)
 
     def _overview_rows(self) -> list[DisplayRow]:
-        temp_size = self._category_size(InsightCategory.TEMP)
-        cache_size = self._category_size(InsightCategory.CACHE)
-        build_size = self._category_size(InsightCategory.BUILD_ARTIFACT)
+        temp_du = self._category_disk_usage(InsightCategory.TEMP)
+        cache_du = self._category_disk_usage(InsightCategory.CACHE)
+        build_du = self._category_disk_usage(InsightCategory.BUILD_ARTIFACT)
 
         rows: list[DisplayRow] = [
             DisplayRow(
                 path="",
-                name=f"Total Size: {format_bytes(self.root.size_bytes)}",
+                name=f"Total Disk: {format_bytes(self.root.disk_usage)}",
                 size_bytes=self.root.size_bytes,
                 detail="",
+                disk_usage=self.root.disk_usage,
             ),
             DisplayRow(
                 path="",
@@ -492,21 +517,24 @@ class DuxApp(App[None]):
             ),
             DisplayRow(
                 path="",
-                name=f"Temp: {format_bytes(temp_size)}",
-                size_bytes=temp_size,
+                name=f"Temp: {format_bytes(temp_du)}",
+                size_bytes=0,
                 detail="",
+                disk_usage=temp_du,
             ),
             DisplayRow(
                 path="",
-                name=f"Cache: {format_bytes(cache_size)}",
-                size_bytes=cache_size,
+                name=f"Cache: {format_bytes(cache_du)}",
+                size_bytes=0,
                 detail="",
+                disk_usage=cache_du,
             ),
             DisplayRow(
                 path="",
-                name=f"Build Artifacts: {format_bytes(build_size)}",
-                size_bytes=build_size,
+                name=f"Build Artifacts: {format_bytes(build_du)}",
+                size_bytes=0,
                 detail="",
+                disk_usage=build_du,
             ),
             DisplayRow(
                 path="",
@@ -525,6 +553,7 @@ class DuxApp(App[None]):
                     name=display_path,
                     size_bytes=node.size_bytes,
                     detail="",
+                    disk_usage=node.disk_usage,
                 )
             )
         return rows
@@ -545,7 +574,8 @@ class DuxApp(App[None]):
                     path=node.path,
                     name=label,
                     size_bytes=node.size_bytes,
-                    detail=format_ts(node.modified_ts),
+                    detail="",
+                    disk_usage=node.disk_usage,
                 )
             )
             if node.kind is NodeKind.DIRECTORY and node.path in self.expanded:
@@ -569,6 +599,7 @@ class DuxApp(App[None]):
                     size_bytes=item.size_bytes,
                     detail=label,
                     type_label=type_label,
+                    disk_usage=item.disk_usage,
                 )
             )
         return rows
@@ -583,6 +614,7 @@ class DuxApp(App[None]):
                     name=display_path,
                     size_bytes=node.size_bytes,
                     detail="",
+                    disk_usage=node.disk_usage,
                 )
             )
         return rows

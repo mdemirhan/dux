@@ -140,6 +140,7 @@ def run(
     overview_dirs: Annotated[int | None, typer.Option("--overview-dirs", help="Top directories in overview.")] = None,
     scroll_step: Annotated[int | None, typer.Option("--scroll-step", help="Lines to jump on PgUp/PgDn.")] = None,
     page_size: Annotated[int | None, typer.Option("--page-size", help="Rows per page in TUI.")] = None,
+    show_size: Annotated[bool, typer.Option("--show-size", "-S", help="Show logical file size column.")] = False,
 ) -> None:
     if sys.platform == "win32":
         console.print("[red]Windows support is not implemented yet.[/]")
@@ -193,7 +194,7 @@ def run(
         if snapshot.stats.access_errors:
             console.print(f"[red]{snapshot.stats.access_errors:,} access errors during scan[/red]")
         if summary:
-            render_summary(console, snapshot.root, snapshot.stats, root_prefix)
+            render_summary(console, snapshot.root, snapshot.stats, root_prefix, show_size=show_size)
         render_focused_summary(
             console,
             snapshot.root,
@@ -204,6 +205,7 @@ def run(
             top_cache=top_cache,
             top_dirs=top_dirs,
             top_files=top_files,
+            show_size=show_size,
         )
         raise typer.Exit(0)
 
@@ -212,6 +214,7 @@ def run(
         stats=snapshot.stats,
         bundle=bundle,
         config=config,
+        show_size=show_size,
     ).run()
 
 

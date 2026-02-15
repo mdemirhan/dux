@@ -9,7 +9,7 @@ from dux.models.insight import Insight, InsightBundle
 from dux.models.scan import ScanNode
 from dux.services.patterns import CompiledRuleSet, compile_ruleset, match_all
 
-# Heap entry: (size_bytes, path, Insight).  Using size as the key so the
+# Heap entry: (disk_usage, path, Insight).  Using disk usage as the key so the
 # smallest item sits at the top of the min-heap for efficient eviction.
 type _HeapEntry = tuple[int, str, Insight]
 
@@ -21,18 +21,18 @@ def _heap_push(
     max_size: int,
 ) -> None:
     """Push *insight* into a bounded min-heap, deduplicating by path."""
-    prev_size = seen.get(insight.path)
-    if prev_size is not None:
-        if insight.size_bytes <= prev_size:
+    prev_usage = seen.get(insight.path)
+    if prev_usage is not None:
+        if insight.disk_usage <= prev_usage:
             return
         # Remove old entry lazily — mark it and let eviction clean up.
         # For simplicity we just allow duplicates in the heap and let the
         # final extraction phase deduplicate.
-    seen[insight.path] = insight.size_bytes
-    entry: _HeapEntry = (insight.size_bytes, insight.path, insight)
+    seen[insight.path] = insight.disk_usage
+    entry: _HeapEntry = (insight.disk_usage, insight.path, insight)
     if len(heap) < max_size:
         heapq.heappush(heap, entry)
-    elif insight.size_bytes > heap[0][0]:
+    elif insight.disk_usage > heap[0][0]:
         heapq.heapreplace(heap, entry)
 
 
@@ -74,13 +74,13 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
 
     # --- aggregate counters (track *all* matches, not just top-K) ---
     category_counts: dict[InsightCategory, int] = {}
-    category_sizes: dict[InsightCategory, int] = {}
+    category_disk_usage: dict[InsightCategory, int] = {}
     category_paths: dict[InsightCategory, set[str]] = {cat: set() for cat in InsightCategory}
 
     def _record(insight: Insight) -> None:
         cat = insight.category
         category_counts[cat] = category_counts.get(cat, 0) + 1
-        category_sizes[cat] = category_sizes.get(cat, 0) + insight.size_bytes
+        category_disk_usage[cat] = category_disk_usage.get(cat, 0) + insight.disk_usage
         category_paths[cat].add(insight.path)
         _heap_push(heaps[cat], seen[cat], insight, config.max_insights_per_category)
 
@@ -135,12 +135,12 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
                 final_seen.add(path)
                 all_insights.append(insight)
 
-    all_insights.sort(key=lambda x: x.size_bytes, reverse=True)
+    all_insights.sort(key=lambda x: x.disk_usage, reverse=True)
 
     return InsightBundle(
         insights=all_insights,
         category_counts=category_counts,
-        category_sizes=category_sizes,
+        category_disk_usage=category_disk_usage,
         category_paths=category_paths,
     )
 
@@ -151,8 +151,8 @@ def _insight_from_rule(node: ScanNode, rule: PatternRule) -> Insight:
         size_bytes=node.size_bytes,
         category=rule.category,
         summary=rule.name,
-        modified_ts=node.modified_ts,
         kind=node.kind,
+        disk_usage=node.disk_usage,
     )
 
 

@@ -10,8 +10,8 @@ from typing import Iterable, Protocol
 @dataclass(slots=True, frozen=True)
 class StatResult:
     size: int
-    mtime: float
     is_dir: bool
+    disk_usage: int = 0
 
 
 @dataclass(slots=True, frozen=True)
@@ -49,8 +49,8 @@ class OsFileSystem:
         st = os.stat(path, follow_symlinks=False)
         return StatResult(
             size=st.st_size,
-            mtime=st.st_mtime,
             is_dir=statmod.S_ISDIR(st.st_mode),
+            disk_usage=st.st_blocks * 512,
         )
 
     def scandir(self, path: str) -> Iterable[DirEntry]:
@@ -60,8 +60,8 @@ class OsFileSystem:
                     st = e.stat(follow_symlinks=False)
                     sr = StatResult(
                         size=st.st_size,
-                        mtime=st.st_mtime,
                         is_dir=statmod.S_ISDIR(st.st_mode),
+                        disk_usage=st.st_blocks * 512,
                     )
                 except OSError:
                     sr = None

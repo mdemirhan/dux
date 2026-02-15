@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 UNITS = ["B", "KB", "MB", "GB", "TB", "PB"]
 
 
@@ -16,12 +14,6 @@ def format_bytes(size: int) -> str:
     if unit == 0:
         return f"{int(value)} {UNITS[unit]}"
     return f"{value:.1f} {UNITS[unit]}"
-
-
-def format_ts(timestamp: float) -> str:
-    if timestamp <= 0:
-        return "-"
-    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
 
 
 def relative_bar(size: int, total: int, width: int = 16) -> str:
