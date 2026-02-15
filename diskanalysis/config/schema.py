@@ -22,7 +22,6 @@ class AppConfig:
     temp_patterns: list[PatternRule] = field(default_factory=list)
     cache_patterns: list[PatternRule] = field(default_factory=list)
     build_artifact_patterns: list[PatternRule] = field(default_factory=list)
-    follow_symlinks: bool = False
     max_depth: int | None = None
     scan_workers: int = 4
     summary_top_count: int = 15
@@ -35,7 +34,6 @@ class AppConfig:
         return {
             "additionalTempPaths": self.additional_temp_paths,
             "additionalCachePaths": self.additional_cache_paths,
-            "followSymlinks": self.follow_symlinks,
             "maxDepth": self.max_depth,
             "scanWorkers": self.scan_workers,
             "summaryTopCount": self.summary_top_count,
@@ -93,7 +91,6 @@ def from_dict(data: dict[str, Any], defaults: AppConfig) -> AppConfig:
             str(x)
             for x in data.get("additionalCachePaths", defaults.additional_cache_paths)
         ],
-        follow_symlinks=bool(data.get("followSymlinks", defaults.follow_symlinks)),
         max_depth=int(max_depth_raw) if max_depth_raw is not None else None,
         scan_workers=max(1, int(data.get("scanWorkers", defaults.scan_workers))),
         summary_top_count=max(

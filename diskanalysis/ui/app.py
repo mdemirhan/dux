@@ -433,7 +433,7 @@ class DiskAnalyzerApp(App[None]):
             return rows, total_items
         if view == "large_dir":
             rows = self._top_nodes_rows(NodeKind.DIRECTORY)
-            return rows, self.stats.directories
+            return rows, max(0, self.stats.directories - 1)
         # large_file
         rows = self._top_nodes_rows(NodeKind.FILE)
         return rows, self.stats.files

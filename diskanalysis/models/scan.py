@@ -31,14 +31,12 @@ class ScanNode:
 class ScanStats:
     files: int = 0
     directories: int = 0
-    bytes_total: int = 0
     access_errors: int = 0
 
 
 @dataclass(slots=True)
 class ScanOptions:
     max_depth: int | None = None
-    follow_symlinks: bool = False
 
 
 @dataclass(slots=True, frozen=True)

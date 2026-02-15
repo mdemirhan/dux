@@ -4,6 +4,7 @@ import threading
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
+import sys
 from typing import Annotated
 
 import typer
@@ -35,7 +36,6 @@ class _ScanProgress:
     current_path: str
     files: int
     directories: int
-    updates: int
     start_time: float
 
 
@@ -72,7 +72,6 @@ def _scan_with_progress(path: Path, options: ScanOptions, workers: int) -> ScanR
         current_path=str(path),
         files=0,
         directories=0,
-        updates=0,
         start_time=time.perf_counter(),
     )
 
@@ -81,14 +80,23 @@ def _scan_with_progress(path: Path, options: ScanOptions, workers: int) -> ScanR
             progress.current_path = current_path
             progress.files = files
             progress.directories = directories
-            progress.updates += 1
 
     def scan_worker() -> None:
         nonlocal result
-        result = scan_path(
-            path, options, progress_callback=on_progress, workers=workers
-        )
-        done.set()
+        try:
+            result = scan_path(
+                path, options, progress_callback=on_progress, workers=workers
+            )
+        except Exception as exc:  # noqa: BLE001
+            result = Err(
+                ScanError(
+                    code=ScanErrorCode.INTERNAL,
+                    path=str(path),
+                    message=f"Unhandled scan failure: {exc}",
+                )
+            )
+        finally:
+            done.set()
 
     thread = threading.Thread(target=scan_worker, daemon=True)
     thread.start()
@@ -165,10 +173,11 @@ def run(
     page_size: Annotated[
         int | None, typer.Option("--page-size", help="Rows per page in TUI.")
     ] = None,
-    follow_symlinks: Annotated[
-        bool, typer.Option("--follow-symlinks", help="Follow symbolic links.")
-    ] = False,
 ) -> None:
+    if sys.platform == "win32":
+        console.print("[red]Windows support is not implemented yet.[/]")
+        raise typer.Exit(1)
+
     if sample_config:
         console.print(sample_config_json())
         raise typer.Exit(0)
@@ -197,14 +206,11 @@ def run(
         overrides["page_size"] = max(10, page_size)
     if max_depth is not None:
         overrides["max_depth"] = max(1, max_depth)
-    if follow_symlinks:
-        overrides["follow_symlinks"] = True
     if overrides:
         config = replace(config, **overrides)
 
     scan_options = ScanOptions(
         max_depth=config.max_depth,
-        follow_symlinks=config.follow_symlinks,
     )
 
     scan_result = _scan_with_progress(

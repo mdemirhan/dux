@@ -61,9 +61,9 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
     # --- compile all rules into a single dispatch structure ---
     ruleset: CompiledRuleSet = compile_ruleset(
         [
-            (config.temp_patterns, "temp"),
-            (config.cache_patterns, "cache"),
-            (config.build_artifact_patterns, "build"),
+            config.temp_patterns,
+            config.cache_patterns,
+            config.build_artifact_patterns,
         ],
         additional_paths=additional_paths or None,
     )

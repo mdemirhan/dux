@@ -147,19 +147,19 @@ class CompiledRuleSet:
 
 
 def compile_ruleset(
-    category_rules: list[tuple[list[PatternRule], str]],
+    category_rules: list[list[PatternRule]],
     additional_paths: list[tuple[str, PatternRule]] | None = None,
 ) -> CompiledRuleSet:
     """Build a single CompiledRuleSet from all categories.
 
-    *category_rules* is a list of (rules, label) pairs — the label is unused,
-    it's just for documentation.  Each rule already carries its own category.
+    *category_rules* is a list of rule-lists. Each rule already carries its own
+    category.
 
     *additional_paths* are pre-normalized (base_path, rule) pairs.
     """
     rs = CompiledRuleSet()
 
-    for rules, _label in category_rules:
+    for rules in category_rules:
         for rule in rules:
             cr = compile_rule(rule)
             tagged = _TaggedRule(rule=rule, apply_to=cr.apply_to)

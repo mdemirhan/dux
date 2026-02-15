@@ -359,7 +359,6 @@ def default_config() -> AppConfig:
         temp_patterns=temp_patterns,
         cache_patterns=cache_patterns,
         build_artifact_patterns=build_artifact_patterns,
-        follow_symlinks=False,
         max_depth=None,
         scan_workers=4,
         summary_top_count=15,

@@ -6,6 +6,7 @@ Production-quality Python terminal disk analyzer with CLI and interactive TUI.
 
 - Python 3.13+
 - `uv`
+- macOS or Linux (Windows is not implemented yet)
 
 ## Setup
 
@@ -47,7 +48,6 @@ Config is fully rule-driven:
 - custom patterns
 - thresholds
 - additional temp/cache paths
-- symlink traversal policy
 - depth controls
 
 ## TUI Views
@@ -81,10 +81,6 @@ Browse:
 Temp:
 
 - `[` / `]`: prev/next page
-
-Symlink behavior:
-
-- `followSymlinks` is fixed to `false` (links are not followed).
 
 ## Test
 

@@ -62,9 +62,8 @@ def scan_path(
         )
 
     resolved_root = str(root_path.absolute())
-    follow_symlinks = options.follow_symlinks
     try:
-        root_stat = root_path.stat(follow_symlinks=follow_symlinks)
+        root_stat = root_path.stat(follow_symlinks=False)
     except OSError as exc:
         return Err(
             ScanError(
@@ -94,7 +93,7 @@ def scan_path(
     q: queue.Queue[_Task | None] = queue.Queue()
     q.put(_Task(root_node, 0))
 
-    stats = ScanStats(files=0, directories=1, bytes_total=0, access_errors=0)
+    stats = ScanStats(files=0, directories=1, access_errors=0)
     stats_lock = threading.Lock()
     cancelled = threading.Event()
 
@@ -131,7 +130,7 @@ def scan_path(
                             break
 
                         try:
-                            stat_result = entry.stat(follow_symlinks=follow_symlinks)
+                            stat_result = entry.stat(follow_symlinks=False)
                         except OSError:
                             with stats_lock:
                                 stats.access_errors += 1
@@ -160,7 +159,6 @@ def scan_path(
                         else:
                             with stats_lock:
                                 stats.files += 1
-                                stats.bytes_total += node.size_bytes
                         emit_progress(node.path)
             except OSError:
                 with stats_lock:
@@ -191,5 +189,4 @@ def scan_path(
         )
 
     _finalize_sizes(root_node)
-    stats.bytes_total = root_node.size_bytes
     return Ok(ScanSnapshot(root=root_node, stats=stats))
