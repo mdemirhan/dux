@@ -618,7 +618,6 @@ class DiskAnalyzerApp(App[None]):
         self.current_view = view
         # Restore saved state for the target view (defaults to top).
         self.selected_index = self._view_cursor.get(view, 0)
-        self._rows_cache.pop(view, None)
         self.pending_g = False
         self._refresh_all()
         # Restore scroll offset after table is rebuilt.
