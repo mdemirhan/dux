@@ -44,7 +44,7 @@ dux/
 └── services/
     ├── fs.py               # FileSystem protocol, OsFileSystem, DEFAULT_FS singleton
     ├── insights.py          # Pattern matching, per-category min-heaps for top-K
-    ├── patterns.py          # Compiled matchers: EXACT, CONTAINS (Aho-Corasick), ENDSWITH, STARTSWITH, GLOB
+    ├── patterns.py          # Compiled matchers: EXACT, CONTAINS+ENDSWITH (Aho-Corasick), STARTSWITH, GLOB
     ├── tree.py              # Tree traversal: iter_nodes, top_nodes (heapq.nlargest), finalize_sizes
     ├── formatting.py        # format_bytes, relative_bar
     └── summary.py           # Non-interactive CLI summary rendering
@@ -91,7 +91,7 @@ Two C extensions accelerate the two hottest paths: directory scanning and patter
 - Custom trie with BFS-constructed fail links and dictionary suffix links.
 - 256-wide child array per node for full byte-range UTF-8 safety.
 - Build once (`add_word` + `make_automaton`), then `iter()` is read-only — inherently thread-safe for concurrent readers.
-- Used by `patterns.py` to match all CONTAINS-type patterns in a single linear pass over each path string, replacing O(patterns × path_length) with O(path_length + matches).
+- Used by `patterns.py` to match all CONTAINS and ENDSWITH patterns in a single linear pass over each path string, replacing O(patterns × path_length) with O(path_length + matches).
 
 ### Scanner Backends (`dux/scan/`)
 
@@ -117,7 +117,7 @@ Pattern matching runs once per node during insight generation — millions of ca
 |---------------|-------------|-------------------|
 | `**/name` | `EXACT` | `dict.get(basename)` — O(1) |
 | `**/segment/**` | `CONTAINS` | Aho-Corasick automaton scan |
-| `**/*.ext` | `ENDSWITH` | `basename.endswith(suffix)` |
+| `**/*.ext` | `ENDSWITH` | Aho-Corasick automaton (end-only key) |
 | `**/prefix*` | `STARTSWITH` | `basename.startswith(prefix)` |
 | Everything else | `GLOB` | `fnmatch` fallback |
 
@@ -127,7 +127,7 @@ Only patterns that truly need globbing fall through to `fnmatch`. In practice, v
 
 **3. Case-insensitive matching without re-lowering:** All matcher values are lowercased at compile time. Paths are lowercased once per node (in `insights.py`), then the pre-lowered values are compared directly.
 
-**4. Aho-Corasick for CONTAINS patterns:** Instead of checking each CONTAINS pattern individually (`O(patterns × path_length)`), all CONTAINS substring needles are loaded into a single C-level Aho-Corasick automaton. `ac.iter(lpath)` finds all matches in one linear scan (`O(path_length + matches)`). Each needle stores both a substring variant (`/segment/`) and an end-of-string variant (`/segment`), with a boolean flag to distinguish them.
+**4. Aho-Corasick for CONTAINS + ENDSWITH patterns:** Instead of checking each pattern individually (`O(patterns × path_length)`), all CONTAINS and ENDSWITH needles are loaded into a single C-level Aho-Corasick automaton. `ac.iter(lpath)` finds all matches in one linear scan (`O(path_length + matches)`). CONTAINS patterns produce two AC keys: a substring variant (`/segment/`, match anywhere) and an end-of-string variant (`/segment`, end-only). ENDSWITH patterns produce one end-only key (e.g., `.log`). Since `lpath` always ends with the basename, `end_idx == len(lpath) - 1` is equivalent to `basename.endswith(suffix)`.
 
 **5. File/dir split at compile time (`CompiledRuleSet`):** Rules with `apply_to=FILE` only go in `for_file`, `apply_to=DIR` only in `for_dir`, and `BOTH` goes in both. The hot loop selects `bk = rs.for_dir if is_dir else rs.for_file` once per node — no per-pattern `apply_to` branching.
 

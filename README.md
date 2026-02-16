@@ -196,8 +196,8 @@ When the GIL is disabled, `default_scanner()` selects `PythonScanner` — the C 
 Pattern matching (insight generation) is the second-hottest path after scanning. dux avoids naive fnmatch-per-rule by classifying all 59 rules at compile time into fast string operations:
 
 - **EXACT** — `dict` lookup on lowercased basename (`O(1)`)
-- **CONTAINS** — Aho-Corasick automaton (C extension) for multi-pattern substring search in a single pass over the path
-- **ENDSWITH / STARTSWITH** — simple `str.endswith` / `str.startswith` on the basename
+- **CONTAINS + ENDSWITH** — Aho-Corasick automaton (C extension) for multi-pattern search in a single pass over the path. ENDSWITH suffixes are added as end-only keys, matched only when they occur at the end of the path
+- **STARTSWITH** — `str.startswith` on the basename
 - **GLOB** — fallback to `fnmatch` only for patterns that can't be decomposed
 
 Brace expansion (`{a,b}`) is resolved at compile time. All matcher values are lowercased once at build time; paths are lowercased once per node for case-insensitive matching.
