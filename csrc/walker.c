@@ -13,74 +13,14 @@
 #endif
 
 /*
- * Iterative directory walker using opendir/readdir/lstat.
+ * Single-directory scanners with GIL released during I/O.
  *
- * Returns a flat list of (path, name, is_dir, size, disk_usage) tuples
- * plus counts (files, dirs, errors).
+ * Exported Python functions:
+ *   scan_dir_nodes(path, parent, leaf, kind_dir, kind_file, ScanNode_cls)
+ *     -> (dir_nodes, file_count, dir_count, error_count)
  *
- * Python signature:
- *   walk(root: str, max_depth: int, progress_cb: Callable | None, cancel_cb: Callable | None)
- *     -> tuple[list[tuple[str, str, bool, int, int]], int, int, int] | None
+ *   scan_dir_bulk_nodes(...)   [macOS only, uses getattrlistbulk]
  */
-
-/* Explicit stack frame for iterative traversal */
-typedef struct {
-    char *path;
-    int depth;
-} StackFrame;
-
-/* Growable stack */
-typedef struct {
-    StackFrame *frames;
-    Py_ssize_t size;
-    Py_ssize_t capacity;
-} Stack;
-
-static int
-stack_init(Stack *s, Py_ssize_t initial_capacity)
-{
-    s->frames = (StackFrame *)malloc(sizeof(StackFrame) * initial_capacity);
-    if (!s->frames) return -1;
-    s->size = 0;
-    s->capacity = initial_capacity;
-    return 0;
-}
-
-static int
-stack_push(Stack *s, const char *path, int depth)
-{
-    if (s->size >= s->capacity) {
-        Py_ssize_t new_cap = s->capacity * 2;
-        StackFrame *new_frames = (StackFrame *)realloc(s->frames, sizeof(StackFrame) * new_cap);
-        if (!new_frames) return -1;
-        s->frames = new_frames;
-        s->capacity = new_cap;
-    }
-    s->frames[s->size].path = strdup(path);
-    if (!s->frames[s->size].path) return -1;
-    s->frames[s->size].depth = depth;
-    s->size++;
-    return 0;
-}
-
-static StackFrame
-stack_pop(Stack *s)
-{
-    s->size--;
-    return s->frames[s->size];
-}
-
-static void
-stack_free(Stack *s)
-{
-    for (Py_ssize_t i = 0; i < s->size; i++) {
-        free(s->frames[i].path);
-    }
-    free(s->frames);
-    s->frames = NULL;
-    s->size = 0;
-    s->capacity = 0;
-}
 
 /* Build full child path: parent + "/" + name */
 static char *
@@ -100,180 +40,10 @@ join_path(const char *parent, const char *name)
     return buf;
 }
 
-static PyObject *
-walker_walk(PyObject *self, PyObject *args)
-{
-    (void)self;
-    const char *root_path;
-    int max_depth;
-    PyObject *progress_cb;
-    PyObject *cancel_cb;
-
-    if (!PyArg_ParseTuple(args, "siOO", &root_path, &max_depth, &progress_cb, &cancel_cb))
-        return NULL;
-
-    if (progress_cb == Py_None) progress_cb = NULL;
-    if (cancel_cb == Py_None) cancel_cb = NULL;
-
-    PyObject *result_list = PyList_New(0);
-    if (!result_list) return NULL;
-
-    Stack stack;
-    if (stack_init(&stack, 256) < 0) {
-        Py_DECREF(result_list);
-        return PyErr_NoMemory();
-    }
-
-    if (stack_push(&stack, root_path, 0) < 0) {
-        stack_free(&stack);
-        Py_DECREF(result_list);
-        return PyErr_NoMemory();
-    }
-
-    long long file_count = 0;
-    long long dir_count = 0;
-    long long error_count = 0;
-    long long entry_counter = 0;
-
-    while (stack.size > 0) {
-        StackFrame frame = stack_pop(&stack);
-        DIR *dp = opendir(frame.path);
-        if (!dp) {
-            error_count++;
-            free(frame.path);
-            continue;
-        }
-
-        struct dirent *ep;
-        while ((ep = readdir(dp)) != NULL) {
-            /* Skip . and .. */
-            if (ep->d_name[0] == '.') {
-                if (ep->d_name[1] == '\0') continue;
-                if (ep->d_name[1] == '.' && ep->d_name[2] == '\0') continue;
-            }
-
-            char *child_path = join_path(frame.path, ep->d_name);
-            if (!child_path) {
-                closedir(dp);
-                free(frame.path);
-                stack_free(&stack);
-                Py_DECREF(result_list);
-                return PyErr_NoMemory();
-            }
-
-            struct stat st;
-            if (lstat(child_path, &st) < 0) {
-                error_count++;
-                free(child_path);
-                continue;
-            }
-
-            int is_dir = S_ISDIR(st.st_mode);
-            long long size = is_dir ? 0 : (long long)st.st_size;
-            long long disk_usage = is_dir ? 0 : (long long)st.st_blocks * 512;
-
-            PyObject *tuple = Py_BuildValue(
-                "(ssNLL)",
-                child_path,
-                ep->d_name,
-                PyBool_FromLong(is_dir),
-                size,
-                disk_usage
-            );
-            if (!tuple) {
-                free(child_path);
-                closedir(dp);
-                free(frame.path);
-                stack_free(&stack);
-                Py_DECREF(result_list);
-                return NULL;
-            }
-
-            if (PyList_Append(result_list, tuple) < 0) {
-                Py_DECREF(tuple);
-                free(child_path);
-                closedir(dp);
-                free(frame.path);
-                stack_free(&stack);
-                Py_DECREF(result_list);
-                return NULL;
-            }
-            Py_DECREF(tuple);
-
-            if (is_dir) {
-                dir_count++;
-                int within_depth = (max_depth < 0) || (frame.depth < max_depth);
-                if (within_depth) {
-                    if (stack_push(&stack, child_path, frame.depth + 1) < 0) {
-                        free(child_path);
-                        closedir(dp);
-                        free(frame.path);
-                        stack_free(&stack);
-                        Py_DECREF(result_list);
-                        return PyErr_NoMemory();
-                    }
-                }
-            } else {
-                file_count++;
-            }
-
-            free(child_path);
-            entry_counter++;
-
-            /* Every 1000 entries: progress + cancel check */
-            if (entry_counter % 1000 == 0) {
-                if (cancel_cb) {
-                    PyObject *cancel_result = PyObject_CallNoArgs(cancel_cb);
-                    if (!cancel_result) {
-                        closedir(dp);
-                        free(frame.path);
-                        stack_free(&stack);
-                        Py_DECREF(result_list);
-                        return NULL;
-                    }
-                    int cancelled = PyObject_IsTrue(cancel_result);
-                    Py_DECREF(cancel_result);
-                    if (cancelled) {
-                        closedir(dp);
-                        free(frame.path);
-                        stack_free(&stack);
-                        Py_DECREF(result_list);
-                        Py_RETURN_NONE;
-                    }
-                }
-                if (progress_cb) {
-                    PyObject *prog_result = PyObject_CallFunction(
-                        progress_cb, "sLL",
-                        frame.path, file_count, dir_count
-                    );
-                    if (!prog_result) {
-                        closedir(dp);
-                        free(frame.path);
-                        stack_free(&stack);
-                        Py_DECREF(result_list);
-                        return NULL;
-                    }
-                    Py_DECREF(prog_result);
-                }
-            }
-        }
-
-        closedir(dp);
-        free(frame.path);
-    }
-
-    stack_free(&stack);
-
-    PyObject *result = Py_BuildValue("(OLLL)", result_list, file_count, dir_count, error_count);
-    Py_DECREF(result_list);
-    return result;
-}
-
 /* ------------------------------------------------------------------ */
-/* scan_dir: scan a single directory with GIL released during I/O     */
+/* Entry buffer: collects results from GIL-free I/O                   */
 /* ------------------------------------------------------------------ */
 
-/* Pre-allocated entry buffer for scan_dir (avoids malloc per entry) */
 typedef struct {
     char *path;     /* full child path (heap-allocated) */
     char *name;     /* points into *path* after last '/' */
@@ -458,59 +228,6 @@ error:
 }
 
 /* ------------------------------------------------------------------ */
-/* scan_dir: legacy tuple-returning variant (kept for compat)         */
-/* ------------------------------------------------------------------ */
-
-static PyObject *
-walker_scan_dir(PyObject *self, PyObject *args)
-{
-    (void)self;
-    const char *dir_path;
-
-    if (!PyArg_ParseTuple(args, "s", &dir_path))
-        return NULL;
-
-    EntryBuf buf;
-    if (entrybuf_init(&buf, 128) < 0)
-        return PyErr_NoMemory();
-
-    long long error_count;
-
-    Py_BEGIN_ALLOW_THREADS
-    error_count = _fill_buf_readdir(dir_path, &buf);
-    Py_END_ALLOW_THREADS
-
-    /* Build Python list from C buffer */
-    PyObject *result_list = PyList_New(buf.size);
-    if (!result_list) {
-        entrybuf_free(&buf);
-        return NULL;
-    }
-
-    for (Py_ssize_t i = 0; i < buf.size; i++) {
-        ScanDirEntry *e = &buf.entries[i];
-        PyObject *tuple = Py_BuildValue(
-            "(ssNLL)",
-            e->path,
-            e->name,
-            PyBool_FromLong(e->is_dir),
-            e->size,
-            e->disk_usage
-        );
-        if (!tuple) {
-            Py_DECREF(result_list);
-            entrybuf_free(&buf);
-            return NULL;
-        }
-        PyList_SET_ITEM(result_list, i, tuple);  /* steals ref */
-    }
-
-    entrybuf_free(&buf);
-
-    return Py_BuildValue("(NL)", result_list, error_count);
-}
-
-/* ------------------------------------------------------------------ */
 /* scan_dir_nodes: create ScanNode objects directly in C              */
 /* ------------------------------------------------------------------ */
 
@@ -542,7 +259,7 @@ walker_scan_dir_nodes(PyObject *self, PyObject *args)
 }
 
 /* ------------------------------------------------------------------ */
-/* scan_dir_bulk: macOS getattrlistbulk for single-syscall stat+readdir */
+/* scan_dir_bulk_nodes: macOS getattrlistbulk                         */
 /* ------------------------------------------------------------------ */
 
 #ifdef __APPLE__
@@ -644,56 +361,6 @@ next_entry:
     return error_count;
 }
 
-/* Legacy tuple-returning variant (kept for compat) */
-static PyObject *
-walker_scan_dir_bulk(PyObject *self, PyObject *args)
-{
-    (void)self;
-    const char *dir_path;
-
-    if (!PyArg_ParseTuple(args, "s", &dir_path))
-        return NULL;
-
-    EntryBuf buf;
-    if (entrybuf_init(&buf, 128) < 0)
-        return PyErr_NoMemory();
-
-    long long error_count;
-
-    Py_BEGIN_ALLOW_THREADS
-    error_count = _fill_buf_bulk(dir_path, &buf);
-    Py_END_ALLOW_THREADS
-
-    /* Build Python list from C buffer */
-    PyObject *result_list = PyList_New(buf.size);
-    if (!result_list) {
-        entrybuf_free(&buf);
-        return NULL;
-    }
-
-    for (Py_ssize_t i = 0; i < buf.size; i++) {
-        ScanDirEntry *e = &buf.entries[i];
-        PyObject *tuple = Py_BuildValue(
-            "(ssNLL)",
-            e->path,
-            e->name,
-            PyBool_FromLong(e->is_dir),
-            e->size,
-            e->disk_usage
-        );
-        if (!tuple) {
-            Py_DECREF(result_list);
-            entrybuf_free(&buf);
-            return NULL;
-        }
-        PyList_SET_ITEM(result_list, i, tuple);
-    }
-
-    entrybuf_free(&buf);
-
-    return Py_BuildValue("(NL)", result_list, error_count);
-}
-
 /* Create ScanNode objects directly in C */
 static PyObject *
 walker_scan_dir_bulk_nodes(PyObject *self, PyObject *args)
@@ -725,24 +392,12 @@ walker_scan_dir_bulk_nodes(PyObject *self, PyObject *args)
 #endif /* __APPLE__ */
 
 static PyMethodDef walker_methods[] = {
-    {"walk", walker_walk, METH_VARARGS,
-     "walk(root, max_depth, progress_cb, cancel_cb) -> (entries, files, dirs, errors) | None\n\n"
-     "Walk directory tree iteratively using opendir/readdir/lstat.\n"
-     "max_depth < 0 means unlimited. Returns None if cancelled."},
-    {"scan_dir", walker_scan_dir, METH_VARARGS,
-     "scan_dir(path) -> (entries, error_count)\n\n"
-     "Scan a single directory (non-recursive) with GIL released during I/O.\n"
-     "Each entry is (path, name, is_dir, size, disk_usage)."},
     {"scan_dir_nodes", walker_scan_dir_nodes, METH_VARARGS,
      "scan_dir_nodes(path, parent, leaf, kind_dir, kind_file, ScanNode_cls)\n"
      "  -> (dir_nodes, file_count, dir_count, error_count)\n\n"
      "Scan a directory, create ScanNode objects directly, append to parent.children.\n"
      "GIL released during I/O."},
 #ifdef __APPLE__
-    {"scan_dir_bulk", walker_scan_dir_bulk, METH_VARARGS,
-     "scan_dir_bulk(path) -> (entries, error_count)\n\n"
-     "Scan a single directory using macOS getattrlistbulk (non-recursive).\n"
-     "Returns name + stat in bulk syscalls. Same format as scan_dir."},
     {"scan_dir_bulk_nodes", walker_scan_dir_bulk_nodes, METH_VARARGS,
      "scan_dir_bulk_nodes(path, parent, leaf, kind_dir, kind_file, ScanNode_cls)\n"
      "  -> (dir_nodes, file_count, dir_count, error_count)\n\n"
@@ -761,7 +416,7 @@ static PyModuleDef_Slot walker_slots[] = {
 static struct PyModuleDef walker_module = {
     PyModuleDef_HEAD_INIT,
     .m_name = "dux._walker",
-    .m_doc = "Fast C directory walker for dux.",
+    .m_doc = "Fast C directory scanner for dux.",
     .m_size = 0,
     .m_methods = walker_methods,
 #ifdef Py_GIL_DISABLED

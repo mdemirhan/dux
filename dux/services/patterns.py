@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from typing import Literal
 
+from dux._matcher import AhoCorasick
+
 from dux.config.schema import PatternRule
 
 # Matcher kinds — integers for fast dispatch in the hot loop.
@@ -111,6 +113,28 @@ class _TaggedRule:
     apply_to: Literal["file", "dir", "both"]
 
 
+def _build_ac(
+    entries: list[tuple[str, str, _TaggedRule]],
+) -> AhoCorasick | None:
+    """Build an Aho-Corasick automaton from CONTAINS matcher entries.
+
+    Each entry is (val, alt, tagged_rule).  *val* is an any-position substring;
+    *alt* is an end-of-string-only suffix.  The automaton value for each key is
+    ``list[tuple[_TaggedRule, bool]]`` where the bool means *end_only*.
+    """
+    if not entries:
+        return None
+    patterns: dict[str, list[tuple[_TaggedRule, bool]]] = {}
+    for val, alt, tr in entries:
+        patterns.setdefault(val, []).append((tr, False))
+        patterns.setdefault(alt, []).append((tr, True))
+    ac = AhoCorasick()
+    for key, value in patterns.items():
+        ac.add_word(key, value)
+    ac.make_automaton()
+    return ac
+
+
 @dataclass(slots=True)
 class CompiledRuleSet:
     """All pattern rules from all categories, indexed by matcher kind."""
@@ -120,10 +144,10 @@ class CompiledRuleSet:
     exact_file: dict[str, list[_TaggedRule]] = field(default_factory=dict)
     exact_dir: dict[str, list[_TaggedRule]] = field(default_factory=dict)
 
-    # CONTAINS: (value, alt, rule) — must iterate but typically short
-    contains_both: list[tuple[str, str, _TaggedRule]] = field(default_factory=list)
-    contains_file: list[tuple[str, str, _TaggedRule]] = field(default_factory=list)
-    contains_dir: list[tuple[str, str, _TaggedRule]] = field(default_factory=list)
+    # CONTAINS: Aho-Corasick automata — single pass per path string
+    ac_both: AhoCorasick | None = None
+    ac_file: AhoCorasick | None = None
+    ac_dir: AhoCorasick | None = None
 
     # ENDSWITH: (suffix, rule)
     endswith_both: list[tuple[str, _TaggedRule]] = field(default_factory=list)
@@ -157,18 +181,31 @@ def compile_ruleset(
     """
     rs = CompiledRuleSet()
 
+    # Collect CONTAINS entries locally; they become automata at the end.
+    cb: list[tuple[str, str, _TaggedRule]] = []
+    cf: list[tuple[str, str, _TaggedRule]] = []
+    cd: list[tuple[str, str, _TaggedRule]] = []
+
     for rules in category_rules:
         for rule in rules:
             cr = compile_rule(rule)
             tagged = _TaggedRule(rule=rule, apply_to=cr.apply_to)
 
             for m in cr.matchers:
-                _add_matcher(rs, m, tagged, cr.apply_to)
+                if m.kind == _CONTAINS:
+                    target = cb if cr.apply_to == "both" else cf if cr.apply_to == "file" else cd
+                    target.append((m.value, m.alt, tagged))
+                else:
+                    _add_matcher(rs, m, tagged, cr.apply_to)
 
     if additional_paths:
         for base, rule in additional_paths:
             tagged = _TaggedRule(rule=rule, apply_to=rule.apply_to)
             rs.additional.append((base, tagged))
+
+    rs.ac_both = _build_ac(cb)
+    rs.ac_file = _build_ac(cf)
+    rs.ac_dir = _build_ac(cd)
 
     return rs
 
@@ -182,11 +219,6 @@ def _add_matcher(
     if m.kind == _EXACT:
         target = rs.exact_both if apply_to == "both" else rs.exact_file if apply_to == "file" else rs.exact_dir
         target.setdefault(m.value, []).append(tagged)
-    elif m.kind == _CONTAINS:
-        target_list = (
-            rs.contains_both if apply_to == "both" else rs.contains_file if apply_to == "file" else rs.contains_dir
-        )
-        target_list.append((m.value, m.alt, tagged))
     elif m.kind == _ENDSWITH:
         target_list = (
             rs.endswith_both if apply_to == "both" else rs.endswith_file if apply_to == "file" else rs.endswith_dir
@@ -244,13 +276,21 @@ def match_all(
         for tr in hits:
             _try(tr)
 
-    # --- CONTAINS: iterate (typically ~15 rules) ---
-    for val, alt, tr in rs.contains_both:
-        if val in lpath or lpath.endswith(alt):
-            _try(tr)
-    for val, alt, tr in rs.contains_dir if is_dir else rs.contains_file:
-        if val in lpath or lpath.endswith(alt):
-            _try(tr)
+    # --- CONTAINS: Aho-Corasick automaton ---
+    _lpath_end = len(lpath) - 1
+    if rs.ac_both is not None:
+        for end_idx, entries in rs.ac_both.iter(lpath):
+            for tr, end_only in entries:
+                if end_only and end_idx != _lpath_end:
+                    continue
+                _try(tr)
+    ac_specific = rs.ac_dir if is_dir else rs.ac_file
+    if ac_specific is not None:
+        for end_idx, entries in ac_specific.iter(lpath):
+            for tr, end_only in entries:
+                if end_only and end_idx != _lpath_end:
+                    continue
+                _try(tr)
 
     # --- ENDSWITH ---
     for suffix, tr in rs.endswith_both:
