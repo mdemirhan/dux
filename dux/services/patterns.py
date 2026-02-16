@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
-from typing import Literal
 
 from dux._matcher import AhoCorasick
 
 from dux.config.schema import PatternRule
+from dux.models.enums import ApplyTo
+
+_FILE = ApplyTo.FILE
+_DIR = ApplyTo.DIR
 
 # Matcher kinds — integers for fast dispatch in the hot loop.
 _CONTAINS = 0  # "/segment/" in path  (for **/segment/**)
@@ -75,19 +78,6 @@ def _expand_braces(pattern: str) -> tuple[str, ...]:
     return tuple(expanded)
 
 
-@dataclass(slots=True, frozen=True)
-class CompiledRule:
-    rule: PatternRule
-    matchers: tuple[_Matcher, ...]
-    apply_to: Literal["file", "dir", "both"]
-
-
-def compile_rule(rule: PatternRule) -> CompiledRule:
-    expanded = _expand_braces(rule.pattern)
-    matchers = tuple(_classify(p) for p in expanded)
-    return CompiledRule(rule=rule, matchers=matchers, apply_to=rule.apply_to)
-
-
 def _match_pattern_slow(pattern: str, normalized_path: str, basename: str) -> bool:
     """Fallback for patterns that can't be classified into simple string ops."""
     if pattern.endswith("/**"):
@@ -103,31 +93,22 @@ def _match_pattern_slow(pattern: str, normalized_path: str, basename: str) -> bo
 # CompiledRuleSet — single-pass, hash-based dispatch for all categories
 # ---------------------------------------------------------------------------
 
-# Each entry in the dispatch lists pairs a rule with metadata needed for
-# apply_to filtering (pre-split into file-only, dir-only, both).
-
-
-@dataclass(slots=True, frozen=True)
-class _TaggedRule:
-    rule: PatternRule
-    apply_to: Literal["file", "dir", "both"]
-
 
 def _build_ac(
-    entries: list[tuple[str, str, _TaggedRule]],
+    entries: list[tuple[str, str, PatternRule]],
 ) -> AhoCorasick | None:
     """Build an Aho-Corasick automaton from CONTAINS matcher entries.
 
-    Each entry is (val, alt, tagged_rule).  *val* is an any-position substring;
+    Each entry is (val, alt, rule).  *val* is an any-position substring;
     *alt* is an end-of-string-only suffix.  The automaton value for each key is
-    ``list[tuple[_TaggedRule, bool]]`` where the bool means *end_only*.
+    ``list[tuple[PatternRule, bool]]`` where the bool means *end_only*.
     """
     if not entries:
         return None
-    patterns: dict[str, list[tuple[_TaggedRule, bool]]] = {}
-    for val, alt, tr in entries:
-        patterns.setdefault(val, []).append((tr, False))
-        patterns.setdefault(alt, []).append((tr, True))
+    patterns: dict[str, list[tuple[PatternRule, bool]]] = {}
+    for val, alt, rule in entries:
+        patterns.setdefault(val, []).append((rule, False))
+        patterns.setdefault(alt, []).append((rule, True))
     ac = AhoCorasick()
     for key, value in patterns.items():
         ac.add_word(key, value)
@@ -136,36 +117,23 @@ def _build_ac(
 
 
 @dataclass(slots=True)
+class _ByKind:
+    """All pattern rules for one node kind (file or dir), indexed by matcher kind."""
+
+    exact: dict[str, list[PatternRule]] = field(default_factory=dict)
+    ac: AhoCorasick | None = None
+    endswith: list[tuple[str, PatternRule]] = field(default_factory=list)
+    startswith: list[tuple[str, PatternRule]] = field(default_factory=list)
+    glob: list[tuple[str, PatternRule]] = field(default_factory=list)
+    additional: list[tuple[str, PatternRule]] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class CompiledRuleSet:
-    """All pattern rules from all categories, indexed by matcher kind."""
+    """All pattern rules from all categories, split by file/dir at compile time."""
 
-    # EXACT: basename → list of matching rules (O(1) dict lookup)
-    exact_both: dict[str, list[_TaggedRule]] = field(default_factory=dict)
-    exact_file: dict[str, list[_TaggedRule]] = field(default_factory=dict)
-    exact_dir: dict[str, list[_TaggedRule]] = field(default_factory=dict)
-
-    # CONTAINS: Aho-Corasick automata — single pass per path string
-    ac_both: AhoCorasick | None = None
-    ac_file: AhoCorasick | None = None
-    ac_dir: AhoCorasick | None = None
-
-    # ENDSWITH: (suffix, rule)
-    endswith_both: list[tuple[str, _TaggedRule]] = field(default_factory=list)
-    endswith_file: list[tuple[str, _TaggedRule]] = field(default_factory=list)
-    endswith_dir: list[tuple[str, _TaggedRule]] = field(default_factory=list)
-
-    # STARTSWITH: (prefix, rule)
-    startswith_both: list[tuple[str, _TaggedRule]] = field(default_factory=list)
-    startswith_file: list[tuple[str, _TaggedRule]] = field(default_factory=list)
-    startswith_dir: list[tuple[str, _TaggedRule]] = field(default_factory=list)
-
-    # GLOB: (pattern, rule) — fallback
-    glob_both: list[tuple[str, _TaggedRule]] = field(default_factory=list)
-    glob_file: list[tuple[str, _TaggedRule]] = field(default_factory=list)
-    glob_dir: list[tuple[str, _TaggedRule]] = field(default_factory=list)
-
-    # Additional path rules (pre-normalized at compile time)
-    additional: list[tuple[str, _TaggedRule]] = field(default_factory=list)
+    for_file: _ByKind = field(default_factory=_ByKind)
+    for_dir: _ByKind = field(default_factory=_ByKind)
 
 
 def compile_ruleset(
@@ -175,67 +143,88 @@ def compile_ruleset(
     """Build a single CompiledRuleSet from all categories.
 
     *category_rules* is a list of rule-lists. Each rule already carries its own
-    category.
+    category.  Rules with ``apply_to=BOTH`` are merged into both file and dir
+    collections at compile time so the hot loop never branches on apply_to.
 
     *additional_paths* are pre-normalized (base_path, rule) pairs.
     """
-    rs = CompiledRuleSet()
-
     # Collect CONTAINS entries locally; they become automata at the end.
-    cb: list[tuple[str, str, _TaggedRule]] = []
-    cf: list[tuple[str, str, _TaggedRule]] = []
-    cd: list[tuple[str, str, _TaggedRule]] = []
+    ac_file: list[tuple[str, str, PatternRule]] = []
+    ac_dir: list[tuple[str, str, PatternRule]] = []
+
+    exact_file: dict[str, list[PatternRule]] = {}
+    exact_dir: dict[str, list[PatternRule]] = {}
+    endswith_file: list[tuple[str, PatternRule]] = []
+    endswith_dir: list[tuple[str, PatternRule]] = []
+    startswith_file: list[tuple[str, PatternRule]] = []
+    startswith_dir: list[tuple[str, PatternRule]] = []
+    glob_file: list[tuple[str, PatternRule]] = []
+    glob_dir: list[tuple[str, PatternRule]] = []
 
     for rules in category_rules:
         for rule in rules:
-            cr = compile_rule(rule)
-            tagged = _TaggedRule(rule=rule, apply_to=cr.apply_to)
+            at = rule.apply_to
 
-            for m in cr.matchers:
+            for expanded_pat in _expand_braces(rule.pattern):
+                m = _classify(expanded_pat)
+
                 if m.kind == _CONTAINS:
-                    target = cb if cr.apply_to == "both" else cf if cr.apply_to == "file" else cd
-                    target.append((m.value, m.alt, tagged))
-                else:
-                    _add_matcher(rs, m, tagged, cr.apply_to)
+                    entry = (m.value, m.alt, rule)
+                    if at & _FILE:
+                        ac_file.append(entry)
+                    if at & _DIR:
+                        ac_dir.append(entry)
+                elif m.kind == _EXACT:
+                    if at & _FILE:
+                        exact_file.setdefault(m.value, []).append(rule)
+                    if at & _DIR:
+                        exact_dir.setdefault(m.value, []).append(rule)
+                elif m.kind == _ENDSWITH:
+                    pair = (m.value, rule)
+                    if at & _FILE:
+                        endswith_file.append(pair)
+                    if at & _DIR:
+                        endswith_dir.append(pair)
+                elif m.kind == _STARTSWITH:
+                    pair = (m.value, rule)
+                    if at & _FILE:
+                        startswith_file.append(pair)
+                    if at & _DIR:
+                        startswith_dir.append(pair)
+                else:  # _GLOB
+                    pair = (m.value, rule)
+                    if at & _FILE:
+                        glob_file.append(pair)
+                    if at & _DIR:
+                        glob_dir.append(pair)
 
+    additional_file: list[tuple[str, PatternRule]] = []
+    additional_dir: list[tuple[str, PatternRule]] = []
     if additional_paths:
         for base, rule in additional_paths:
-            tagged = _TaggedRule(rule=rule, apply_to=rule.apply_to)
-            rs.additional.append((base, tagged))
+            if rule.apply_to & _FILE:
+                additional_file.append((base, rule))
+            if rule.apply_to & _DIR:
+                additional_dir.append((base, rule))
 
-    rs.ac_both = _build_ac(cb)
-    rs.ac_file = _build_ac(cf)
-    rs.ac_dir = _build_ac(cd)
-
-    return rs
-
-
-def _add_matcher(
-    rs: CompiledRuleSet,
-    m: _Matcher,
-    tagged: _TaggedRule,
-    apply_to: Literal["file", "dir", "both"],
-) -> None:
-    if m.kind == _EXACT:
-        target = rs.exact_both if apply_to == "both" else rs.exact_file if apply_to == "file" else rs.exact_dir
-        target.setdefault(m.value, []).append(tagged)
-    elif m.kind == _ENDSWITH:
-        target_list = (
-            rs.endswith_both if apply_to == "both" else rs.endswith_file if apply_to == "file" else rs.endswith_dir
-        )
-        target_list.append((m.value, tagged))
-    elif m.kind == _STARTSWITH:
-        target_list = (
-            rs.startswith_both
-            if apply_to == "both"
-            else rs.startswith_file
-            if apply_to == "file"
-            else rs.startswith_dir
-        )
-        target_list.append((m.value, tagged))
-    else:  # _GLOB
-        target_list = rs.glob_both if apply_to == "both" else rs.glob_file if apply_to == "file" else rs.glob_dir
-        target_list.append((m.value, tagged))
+    return CompiledRuleSet(
+        for_file=_ByKind(
+            exact=exact_file,
+            ac=_build_ac(ac_file),
+            endswith=endswith_file,
+            startswith=startswith_file,
+            glob=glob_file,
+            additional=additional_file,
+        ),
+        for_dir=_ByKind(
+            exact=exact_dir,
+            ac=_build_ac(ac_dir),
+            endswith=endswith_dir,
+            startswith=startswith_dir,
+            glob=glob_dir,
+            additional=additional_dir,
+        ),
+    )
 
 
 def match_all(
@@ -257,73 +246,50 @@ def match_all(
     ``for`` loops instead of list comprehensions to avoid allocating ~10
     temporary lists per call.  Do not refactor back to comprehensions.
     """
+    bk = rs.for_dir if is_dir else rs.for_file
     matched: list[PatternRule] = []
     seen: set[str] = set()
 
-    def _try(tr: _TaggedRule) -> None:
-        cat = tr.rule.category.value
+    def _try(rule: PatternRule) -> None:
+        cat = rule.category.value
         if cat not in seen:
             seen.add(cat)
-            matched.append(tr.rule)
+            matched.append(rule)
 
     # --- EXACT: O(1) dict lookup ---
-    hits = rs.exact_both.get(lbase)
+    hits = bk.exact.get(lbase)
     if hits:
-        for tr in hits:
-            _try(tr)
-    hits = (rs.exact_dir if is_dir else rs.exact_file).get(lbase)
-    if hits:
-        for tr in hits:
-            _try(tr)
+        for rule in hits:
+            _try(rule)
 
     # --- CONTAINS: Aho-Corasick automaton ---
-    _lpath_end = len(lpath) - 1
-    if rs.ac_both is not None:
-        for end_idx, entries in rs.ac_both.iter(lpath):
-            for tr, end_only in entries:
+    if bk.ac is not None:
+        _lpath_end = len(lpath) - 1
+        for end_idx, entries in bk.ac.iter(lpath):
+            for rule, end_only in entries:
                 if end_only and end_idx != _lpath_end:
                     continue
-                _try(tr)
-    ac_specific = rs.ac_dir if is_dir else rs.ac_file
-    if ac_specific is not None:
-        for end_idx, entries in ac_specific.iter(lpath):
-            for tr, end_only in entries:
-                if end_only and end_idx != _lpath_end:
-                    continue
-                _try(tr)
+                _try(rule)
 
     # --- ENDSWITH ---
-    for suffix, tr in rs.endswith_both:
+    for suffix, rule in bk.endswith:
         if lbase.endswith(suffix):
-            _try(tr)
-    for suffix, tr in rs.endswith_dir if is_dir else rs.endswith_file:
-        if lbase.endswith(suffix):
-            _try(tr)
+            _try(rule)
 
     # --- STARTSWITH ---
-    for prefix, tr in rs.startswith_both:
+    for prefix, rule in bk.startswith:
         if lbase.startswith(prefix):
-            _try(tr)
-    for prefix, tr in rs.startswith_dir if is_dir else rs.startswith_file:
-        if lbase.startswith(prefix):
-            _try(tr)
+            _try(rule)
 
     # --- GLOB fallback ---
-    for pat, tr in rs.glob_both:
+    for pat, rule in bk.glob:
         if _match_pattern_slow(pat, lpath, lbase):
-            _try(tr)
-    for pat, tr in rs.glob_dir if is_dir else rs.glob_file:
-        if _match_pattern_slow(pat, lpath, lbase):
-            _try(tr)
+            _try(rule)
 
     # --- Additional paths (pre-normalized) ---
-    if rs.additional:
-        for base, tr in rs.additional:
-            if tr.apply_to == "file" and is_dir:
-                continue
-            if tr.apply_to == "dir" and not is_dir:
-                continue
+    if bk.additional:
+        for base, rule in bk.additional:
             if raw_path == base or raw_path.startswith(base + "/"):
-                _try(tr)
+                _try(rule)
 
     return matched

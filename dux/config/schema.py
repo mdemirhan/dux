@@ -1,9 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, cast
+from typing import Any
 
-from dux.models.enums import InsightCategory
+from dux.models.enums import ApplyTo, InsightCategory
+
+_APPLY_TO_FROM_STR: dict[str, ApplyTo] = {
+    "file": ApplyTo.FILE,
+    "dir": ApplyTo.DIR,
+    "both": ApplyTo.BOTH,
+}
+
+_APPLY_TO_TO_STR: dict[ApplyTo, str] = {v: k for k, v in _APPLY_TO_FROM_STR.items()}
 
 
 @dataclass(slots=True)
@@ -11,7 +19,7 @@ class PatternRule:
     name: str
     pattern: str
     category: InsightCategory
-    apply_to: Literal["file", "dir", "both"] = "both"
+    apply_to: ApplyTo = ApplyTo.BOTH
     stop_recursion: bool = False
 
 
@@ -52,19 +60,13 @@ def _rule_to_dict(rule: PatternRule) -> dict[str, Any]:
         "name": rule.name,
         "pattern": rule.pattern,
         "category": rule.category.value,
-        "applyTo": rule.apply_to,
+        "applyTo": _APPLY_TO_TO_STR.get(rule.apply_to, "both"),
         "stopRecursion": rule.stop_recursion,
     }
 
 
-_VALID_APPLY_TO: set[str] = {"file", "dir", "both"}
-
-
-def _parse_apply_to(value: Any) -> Literal["file", "dir", "both"]:
-    raw = str(value)
-    if raw in _VALID_APPLY_TO:
-        return cast(Literal["file", "dir", "both"], raw)
-    return "both"
+def _parse_apply_to(value: Any) -> ApplyTo:
+    return _APPLY_TO_FROM_STR.get(str(value), ApplyTo.BOTH)
 
 
 def _rule_from_dict(payload: dict[str, Any]) -> PatternRule:

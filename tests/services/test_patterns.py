@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from dux.config.schema import PatternRule
-from dux.models.enums import InsightCategory
+from dux.models.enums import ApplyTo, InsightCategory
 from dux.services.patterns import (
     CompiledRuleSet,
     _CONTAINS,
@@ -102,13 +102,16 @@ def test_classify_lowercases_values() -> None:
 # ── compile_ruleset / match_all pipeline ────────────────────────────
 
 
+_APPLY_TO_STR: dict[str, ApplyTo] = {"file": ApplyTo.FILE, "dir": ApplyTo.DIR, "both": ApplyTo.BOTH}
+
+
 def _rule(
     name: str,
     pattern: str,
     category: InsightCategory = InsightCategory.TEMP,
     apply_to: str = "both",
 ) -> PatternRule:
-    return PatternRule(name=name, pattern=pattern, category=category, apply_to=apply_to)  # pyright: ignore[reportArgumentType]
+    return PatternRule(name=name, pattern=pattern, category=category, apply_to=_APPLY_TO_STR[apply_to])
 
 
 def test_apply_to_file_does_not_match_dirs() -> None:
@@ -222,18 +225,16 @@ def test_glob_fallback() -> None:
 
 
 def test_ac_fields_none_when_no_contains_rules() -> None:
-    """ac_both/ac_file/ac_dir are None when no CONTAINS rules for that apply_to."""
+    """for_file.ac/for_dir.ac are None when no CONTAINS rules for that apply_to."""
     rs = compile_ruleset([[_rule("r", "**/.DS_Store", apply_to="file")]])
-    assert rs.ac_both is None
-    assert rs.ac_file is None
-    assert rs.ac_dir is None
+    assert rs.for_file.ac is None
+    assert rs.for_dir.ac is None
 
 
 def test_ac_both_populated_for_both_contains() -> None:
     rs = compile_ruleset([[_rule("r", "**/tmp/**", apply_to="both")]])
-    assert rs.ac_both is not None
-    assert rs.ac_file is None
-    assert rs.ac_dir is None
+    assert rs.for_file.ac is not None
+    assert rs.for_dir.ac is not None
 
 
 def test_additional_paths_exact_match() -> None:

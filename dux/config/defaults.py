@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from dux.config.schema import AppConfig, PatternRule
-from dux.models.enums import InsightCategory
+from dux.models.enums import ApplyTo, InsightCategory
 
 
 def default_config() -> AppConfig:
@@ -24,7 +24,7 @@ def default_config() -> AppConfig:
             "Log Files",
             "**/*.log",
             InsightCategory.TEMP,
-            "file",
+            ApplyTo.FILE,
         ),
         PatternRule(
             "Pytest Cache",
@@ -50,25 +50,25 @@ def default_config() -> AppConfig:
             "Editor Swaps",
             "**/*.{swp,swo,tmp,bak}",
             InsightCategory.TEMP,
-            "file",
+            ApplyTo.FILE,
         ),
         PatternRule(
             "macOS Metadata",
             "**/.DS_Store",
             InsightCategory.TEMP,
-            "file",
+            ApplyTo.FILE,
         ),
         PatternRule(
             "npm Logs",
             "**/npm-debug.log*",
             InsightCategory.TEMP,
-            "file",
+            ApplyTo.FILE,
         ),
         PatternRule(
             "Yarn Logs",
             "**/yarn-error.log*",
             InsightCategory.TEMP,
-            "file",
+            ApplyTo.FILE,
         ),
         PatternRule(
             "Crash Reports",
@@ -79,7 +79,7 @@ def default_config() -> AppConfig:
             "SQLite Journals",
             "**/*.db-journal",
             InsightCategory.TEMP,
-            "file",
+            ApplyTo.FILE,
         ),
     ]
 
@@ -287,7 +287,7 @@ def default_config() -> AppConfig:
             "Python Egg Info",
             "**/*.egg-info",
             InsightCategory.BUILD_ARTIFACT,
-            apply_to="dir",
+            apply_to=ApplyTo.DIR,
             stop_recursion=True,
         ),
         PatternRule(

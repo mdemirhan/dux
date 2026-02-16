@@ -16,9 +16,14 @@ class Insight:
 
 
 @dataclass(slots=True)
+class CategoryStats:
+    count: int = 0
+    size_bytes: int = 0
+    disk_usage: int = 0
+    paths: set[str] = field(default_factory=set)
+
+
+@dataclass(slots=True)
 class InsightBundle:
     insights: list[Insight]
-    category_counts: dict[InsightCategory, int] = field(default_factory=dict)
-    category_size_bytes: dict[InsightCategory, int] = field(default_factory=dict)
-    category_disk_usage: dict[InsightCategory, int] = field(default_factory=dict)
-    category_paths: dict[InsightCategory, set[str]] = field(default_factory=dict)
+    by_category: dict[InsightCategory, CategoryStats] = field(default_factory=dict)

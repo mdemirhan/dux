@@ -4,8 +4,8 @@ import heapq
 from pathlib import Path
 
 from dux.config.schema import AppConfig, PatternRule
-from dux.models.enums import InsightCategory
-from dux.models.insight import Insight, InsightBundle
+from dux.models.enums import ApplyTo, InsightCategory
+from dux.models.insight import CategoryStats, Insight, InsightBundle
 from dux.models.scan import ScanNode
 from dux.services.patterns import CompiledRuleSet, compile_ruleset, match_all
 
@@ -52,7 +52,7 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
                         name=f"Additional {category.value} path",
                         pattern=base,
                         category=category,
-                        apply_to="both",
+                        apply_to=ApplyTo.BOTH,
                         stop_recursion=False,
                     ),
                 )
@@ -73,18 +73,15 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
     seen: dict[InsightCategory, dict[str, int]] = {cat: {} for cat in InsightCategory}
 
     # --- aggregate counters (track *all* matches, not just top-K) ---
-    category_counts: dict[InsightCategory, int] = {}
-    category_size_bytes: dict[InsightCategory, int] = {}
-    category_disk_usage: dict[InsightCategory, int] = {}
-    category_paths: dict[InsightCategory, set[str]] = {cat: set() for cat in InsightCategory}
+    by_category: dict[InsightCategory, CategoryStats] = {cat: CategoryStats() for cat in InsightCategory}
 
     def _record(insight: Insight) -> None:
-        cat = insight.category
-        category_counts[cat] = category_counts.get(cat, 0) + 1
-        category_size_bytes[cat] = category_size_bytes.get(cat, 0) + insight.size_bytes
-        category_disk_usage[cat] = category_disk_usage.get(cat, 0) + insight.disk_usage
-        category_paths[cat].add(insight.path)
-        _heap_push(heaps[cat], seen[cat], insight, config.max_insights_per_category)
+        cs = by_category[insight.category]
+        cs.count += 1
+        cs.size_bytes += insight.size_bytes
+        cs.disk_usage += insight.disk_usage
+        cs.paths.add(insight.path)
+        _heap_push(heaps[insight.category], seen[insight.category], insight, config.max_insights_per_category)
 
     # --- main traversal ---
     _TEMP = InsightCategory.TEMP
@@ -143,10 +140,7 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
 
     return InsightBundle(
         insights=all_insights,
-        category_counts=category_counts,
-        category_size_bytes=category_size_bytes,
-        category_disk_usage=category_disk_usage,
-        category_paths=category_paths,
+        by_category=by_category,
     )
 
 
