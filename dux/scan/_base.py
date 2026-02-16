@@ -3,7 +3,6 @@ from __future__ import annotations
 import queue
 import threading
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
 from dataclasses import dataclass
 
 from result import Err, Ok
@@ -21,7 +20,7 @@ from dux.models.scan import (
     ScanStats,
 )
 from dux.services.fs import DEFAULT_FS, FileSystem
-from dux.services.tree import LEAF_CHILDREN, finalize_sizes
+from dux.services.tree import finalize_sizes
 
 
 @dataclass(slots=True, frozen=True)
@@ -67,10 +66,10 @@ class ThreadedScannerBase(ABC):
         self._fs = fs
 
     @abstractmethod
-    def _scan_dir(self, path: str) -> tuple[Sequence[tuple[str, str, bool, int, int]], int]:
-        """Read a single directory and return (entries, error_count).
+    def _scan_dir(self, parent: ScanNode, path: str) -> tuple[list[ScanNode], int, int, int]:
+        """Read a directory, create nodes, and append them to *parent*.children.
 
-        Each entry is ``(path, name, is_dir, size, disk_usage)``.
+        Returns ``(dir_child_nodes, file_count, dir_count, error_count)``.
         """
 
     def scan(
@@ -144,33 +143,20 @@ class ThreadedScannerBase(ABC):
                     continue
 
                 try:
-                    entries, err_count = self._scan_dir(task.node.path)
-                    local_errors += err_count
+                    dir_children, files, dirs, errs = self._scan_dir(task.node, task.node.path)
+                    prev_total = local_files + local_dirs
+                    local_files += files
+                    local_dirs += dirs
+                    local_errors += errs
 
-                    for entry_path, name, is_dir, size, disk_usage in entries:
-                        if _is_cancelled():
-                            break
+                    within_depth = options.max_depth is None or task.depth < options.max_depth
+                    if within_depth:
+                        for dir_node in dir_children:
+                            q.put(_Task(dir_node, task.depth + 1))
 
-                        node = ScanNode(
-                            path=entry_path,
-                            name=name,
-                            kind=NodeKind.DIRECTORY if is_dir else NodeKind.FILE,
-                            size_bytes=size,
-                            disk_usage=disk_usage,
-                            children=[] if is_dir else LEAF_CHILDREN,
-                        )
-                        task.node.children.append(node)
-
-                        if is_dir:
-                            local_dirs += 1
-                            within_depth = options.max_depth is None or task.depth < options.max_depth
-                            if within_depth:
-                                q.put(_Task(node, task.depth + 1))
-                        else:
-                            local_files += 1
-
-                        if (local_dirs + local_files) % 100 == 0:
-                            emit_progress(node.path, local_files, local_dirs)
+                    new_total = local_files + local_dirs
+                    if new_total // 100 > prev_total // 100:
+                        emit_progress(task.node.path, local_files, local_dirs)
                 except Exception:  # noqa: BLE001
                     local_errors += 1
                 finally:

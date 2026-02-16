@@ -111,9 +111,12 @@ def test_progress_callback_invoked() -> None:
 
 
 def test_cancellation_respected() -> None:
+    # Cancellation is checked between directories, so we need multiple dirs
     fs = MemoryFileSystem().add_dir("/root")
-    for idx in range(50):
-        fs.add_file(f"/root/f{idx}.bin", size=1)
+    for idx in range(5):
+        fs.add_dir(f"/root/d{idx}")
+        for jdx in range(10):
+            fs.add_file(f"/root/d{idx}/f{jdx}.bin", size=1)
 
     calls = 0
 
