@@ -1,3 +1,61 @@
+# Pattern compilation and matching engine.
+#
+# Two-phase architecture:
+#
+#   PHASE 1 — COMPILE  (compile_ruleset, called once at startup)
+#
+#   Each PatternRule has a glob pattern like "**/node_modules/**".
+#   Compilation turns these into a fast CompiledRuleSet:
+#
+#   1. Brace expansion — _expand_braces turns "**/*.{swp,bak}" into
+#      two patterns: "**/*.swp" and "**/*.bak".
+#
+#   2. Classification — _classify assigns a matcher kind to each pattern:
+#
+#        Kind        Example            Fast operation
+#        ----------  -----------------  ----------------------------------
+#        EXACT       **/name            dict lookup on basename
+#        CONTAINS    **/segment/**      Aho-Corasick on full path
+#        ENDSWITH    **/*.ext           Aho-Corasick (end-only) on full path
+#        STARTSWITH  **/prefix*         str.startswith on basename
+#        GLOB        (anything else)    fnmatch fallback
+#
+#   3. Bucketing — patterns are split by apply_to (file/dir/both) at
+#      compile time so the hot loop never branches on node kind.
+#
+#   4. Aho-Corasick automaton — CONTAINS and ENDSWITH patterns are merged
+#      into a single AhoCorasick automaton per node kind (file/dir).
+#      Each pattern becomes a (val, alt, rule) entry fed to _build_ac:
+#
+#        CONTAINS  "**/tmp/**"   -> val="/tmp/" (match anywhere),
+#                                   alt="/tmp"  (end-of-path only).
+#                                   The alt handles paths ending with the
+#                                   segment itself, e.g. "/a/tmp".
+#
+#        ENDSWITH  "**/*.log"    -> val=""       (skipped),
+#                                   alt=".log"  (end-of-path only).
+#                                   Since lpath ends with the basename,
+#                                   end_idx == len(lpath)-1 is equivalent
+#                                   to basename.endswith(suffix).
+#
+#      _build_ac skips empty keys, so ENDSWITH entries produce only an
+#      end-only key while CONTAINS entries produce both.
+#
+#   PHASE 2 — MATCH  (match_all, called once per node)
+#
+#   match_all receives a pre-lowercased path (lpath), basename (lbase),
+#   and the CompiledRuleSet.  It checks each tier in order, returning at
+#   most one rule per category (first match wins):
+#
+#     1. EXACT             — O(1) dict lookup on lbase.
+#     2. CONTAINS+ENDSWITH — single ac.iter(lpath) call. Hits flagged
+#                            end_only=True are accepted only when
+#                            end_idx == len(lpath) - 1.
+#     3. STARTSWITH        — linear scan of prefix rules against lbase.
+#     4. GLOB              — fnmatch fallback.
+#     5. Additional paths  — literal path prefix checks for user-configured
+#                            directories (e.g. ~/.cache).
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -23,7 +81,7 @@ _GLOB = 4  # fallback to fnmatch
 class _Matcher:
     kind: int
     value: str
-    alt: str  # _CONTAINS only: endswith variant without trailing /
+    alt: str  # _CONTAINS: endswith variant without trailing /; _ENDSWITH: ""
 
 
 def _has_glob_chars(s: str) -> bool:
@@ -97,18 +155,21 @@ def _match_pattern_slow(pattern: str, normalized_path: str, basename: str) -> bo
 def _build_ac(
     entries: list[tuple[str, str, PatternRule]],
 ) -> AhoCorasick | None:
-    """Build an Aho-Corasick automaton from CONTAINS matcher entries.
+    """Build an Aho-Corasick automaton from CONTAINS and ENDSWITH entries.
 
-    Each entry is (val, alt, rule).  *val* is an any-position substring;
-    *alt* is an end-of-string-only suffix.  The automaton value for each key is
-    ``list[tuple[PatternRule, bool]]`` where the bool means *end_only*.
+    Each entry is (val, alt, rule).  *val* is an any-position substring
+    (empty for ENDSWITH-only entries); *alt* is an end-of-string-only suffix.
+    The automaton value for each key is ``list[tuple[PatternRule, bool]]``
+    where the bool means *end_only*.
     """
     if not entries:
         return None
     patterns: dict[str, list[tuple[PatternRule, bool]]] = {}
     for val, alt, rule in entries:
-        patterns.setdefault(val, []).append((rule, False))
-        patterns.setdefault(alt, []).append((rule, True))
+        if val:
+            patterns.setdefault(val, []).append((rule, False))
+        if alt:
+            patterns.setdefault(alt, []).append((rule, True))
     ac = AhoCorasick()
     for key, value in patterns.items():
         ac.add_word(key, value)
@@ -122,7 +183,6 @@ class _ByKind:
 
     exact: dict[str, list[PatternRule]] = field(default_factory=dict)
     ac: AhoCorasick | None = None
-    endswith: list[tuple[str, PatternRule]] = field(default_factory=list)
     startswith: list[tuple[str, PatternRule]] = field(default_factory=list)
     glob: list[tuple[str, PatternRule]] = field(default_factory=list)
     additional: list[tuple[str, PatternRule]] = field(default_factory=list)
@@ -154,8 +214,6 @@ def compile_ruleset(
 
     exact_file: dict[str, list[PatternRule]] = {}
     exact_dir: dict[str, list[PatternRule]] = {}
-    endswith_file: list[tuple[str, PatternRule]] = []
-    endswith_dir: list[tuple[str, PatternRule]] = []
     startswith_file: list[tuple[str, PatternRule]] = []
     startswith_dir: list[tuple[str, PatternRule]] = []
     glob_file: list[tuple[str, PatternRule]] = []
@@ -180,11 +238,11 @@ def compile_ruleset(
                     if at & _DIR:
                         exact_dir.setdefault(m.value, []).append(rule)
                 elif m.kind == _ENDSWITH:
-                    pair = (m.value, rule)
+                    entry = ("", m.value, rule)
                     if at & _FILE:
-                        endswith_file.append(pair)
+                        ac_file.append(entry)
                     if at & _DIR:
-                        endswith_dir.append(pair)
+                        ac_dir.append(entry)
                 elif m.kind == _STARTSWITH:
                     pair = (m.value, rule)
                     if at & _FILE:
@@ -211,7 +269,6 @@ def compile_ruleset(
         for_file=_ByKind(
             exact=exact_file,
             ac=_build_ac(ac_file),
-            endswith=endswith_file,
             startswith=startswith_file,
             glob=glob_file,
             additional=additional_file,
@@ -219,7 +276,6 @@ def compile_ruleset(
         for_dir=_ByKind(
             exact=exact_dir,
             ac=_build_ac(ac_dir),
-            endswith=endswith_dir,
             startswith=startswith_dir,
             glob=glob_dir,
             additional=additional_dir,
@@ -262,7 +318,7 @@ def match_all(
         for rule in hits:
             _try(rule)
 
-    # --- CONTAINS: Aho-Corasick automaton ---
+    # --- CONTAINS + ENDSWITH: Aho-Corasick automaton ---
     if bk.ac is not None:
         _lpath_end = len(lpath) - 1
         for end_idx, entries in bk.ac.iter(lpath):
@@ -270,11 +326,6 @@ def match_all(
                 if end_only and end_idx != _lpath_end:
                     continue
                 _try(rule)
-
-    # --- ENDSWITH ---
-    for suffix, rule in bk.endswith:
-        if lbase.endswith(suffix):
-            _try(rule)
 
     # --- STARTSWITH ---
     for prefix, rule in bk.startswith:
