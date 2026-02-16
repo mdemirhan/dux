@@ -145,6 +145,9 @@ def run(
     scanner: Annotated[
         str, typer.Option("--scanner", "-S", help="Scanner variant: auto, python, posix, macos.")
     ] = "auto",
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print GIL status, scanner, and timing info.")
+    ] = False,
 ) -> None:
     if sys.platform == "win32":
         console.print("[red]Windows support is not implemented yet.[/]")
@@ -200,15 +203,29 @@ def run(
         console.print(f"[red]Unknown scanner: {scanner}. Use: auto, python, posix, macos.[/]")
         raise typer.Exit(1)
 
+    if verbose:
+        gil_status = "enabled" if sys._is_gil_enabled() else "disabled"  # pyright: ignore[reportPrivateUsage]  # noqa: SLF001
+        scanner_name = type(scanner_impl).__name__
+        console.print(f"[#969896]GIL: {gil_status} | Scanner: {scanner_name} | Workers: {config.scan_workers}[/]")
+
+    t0 = time.perf_counter()
     scan_result = _scan_with_progress(Path(path), scan_options, workers=config.scan_workers, scanner=scanner_impl)
     if isinstance(scan_result, Err):
         error = scan_result.unwrap_err()
         console.print(f"[red]Scan failed for {escape(error.path)}: {escape(error.message)}[/]")
         raise typer.Exit(1)
     snapshot = scan_result.unwrap()
+    scan_elapsed = time.perf_counter() - t0
 
+    t1 = time.perf_counter()
     with console.status("[bold #8abeb7]Generating insights...[/]"):
         bundle = generate_insights(snapshot.root, config)
+    insight_elapsed = time.perf_counter() - t1
+
+    if verbose:
+        stats = snapshot.stats
+        msg = f"[#969896]Scan: {scan_elapsed:.2f}s | Insights: {insight_elapsed:.2f}s | {stats.files:,} files, {stats.directories:,} dirs[/]"
+        console.print(msg)
 
     if interactive:
         DuxApp(

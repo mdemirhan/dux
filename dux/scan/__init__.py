@@ -19,15 +19,23 @@ class Scanner(Protocol):
 
 
 def default_scanner(workers: int = 8) -> ThreadedScannerBase:
-    """Return the best available scanner for the current platform."""
+    """Return the best available scanner for the current platform.
+
+    macOS → MacOSScanner (getattrlistbulk).
+    GIL enabled → PosixScanner (C readdir, benefits from GIL release during I/O).
+    GIL disabled → PythonScanner (true parallelism makes the C overhead negligible).
+    """
     if sys.platform == "darwin":
         from dux.scan.macos_scanner import MacOSScanner
 
         return MacOSScanner(workers=workers)
 
-    from dux.scan.posix_scanner import PosixScanner
+    if sys._is_gil_enabled():  # pyright: ignore[reportPrivateUsage]
+        from dux.scan.posix_scanner import PosixScanner
 
-    return PosixScanner(workers=workers)
+        return PosixScanner(workers=workers)
+
+    return PythonScanner(workers=workers)
 
 
 __all__ = [
