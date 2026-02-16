@@ -8,7 +8,7 @@ from dux.scan._base import ThreadedScannerBase
 from dux.services.tree import LEAF_CHILDREN
 
 
-class NativeScanner(ThreadedScannerBase):
+class PosixScanner(ThreadedScannerBase):
     def __init__(self, workers: int = 8) -> None:
         super().__init__(workers=workers)
 

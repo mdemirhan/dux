@@ -143,7 +143,7 @@ def run(
     page_size: Annotated[int | None, typer.Option("--page-size", help="Rows per page in TUI.")] = None,
     show_size: Annotated[bool, typer.Option("--show-size", "-s", help="Show logical file size column.")] = False,
     scanner: Annotated[
-        str, typer.Option("--scanner", "-S", help="Scanner variant: auto, python, native, bulk.")
+        str, typer.Option("--scanner", "-S", help="Scanner variant: auto, python, posix, macos.")
     ] = "auto",
 ) -> None:
     if sys.platform == "win32":
@@ -188,16 +188,16 @@ def run(
         scanner_impl = default_scanner(workers=config.scan_workers)
     elif scanner == "python":
         scanner_impl = PythonScanner(workers=config.scan_workers)
-    elif scanner == "native":
-        from dux.scan.native_scanner import NativeScanner
+    elif scanner == "posix":
+        from dux.scan.posix_scanner import PosixScanner
 
-        scanner_impl = NativeScanner(workers=config.scan_workers)
-    elif scanner == "bulk":
-        from dux.scan.bulk_scanner import BulkScanner
+        scanner_impl = PosixScanner(workers=config.scan_workers)
+    elif scanner == "macos":
+        from dux.scan.macos_scanner import MacOSScanner
 
-        scanner_impl = BulkScanner(workers=config.scan_workers)
+        scanner_impl = MacOSScanner(workers=config.scan_workers)
     else:
-        console.print(f"[red]Unknown scanner: {scanner}. Use: auto, python, native, bulk.[/]")
+        console.print(f"[red]Unknown scanner: {scanner}. Use: auto, python, posix, macos.[/]")
         raise typer.Exit(1)
 
     scan_result = _scan_with_progress(Path(path), scan_options, workers=config.scan_workers, scanner=scanner_impl)

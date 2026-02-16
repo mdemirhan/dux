@@ -21,13 +21,13 @@ class Scanner(Protocol):
 def default_scanner(workers: int = 8) -> ThreadedScannerBase:
     """Return the best available scanner for the current platform."""
     if sys.platform == "darwin":
-        from dux.scan.bulk_scanner import BulkScanner
+        from dux.scan.macos_scanner import MacOSScanner
 
-        return BulkScanner(workers=workers)
+        return MacOSScanner(workers=workers)
 
-    from dux.scan.native_scanner import NativeScanner
+    from dux.scan.posix_scanner import PosixScanner
 
-    return NativeScanner(workers=workers)
+    return PosixScanner(workers=workers)
 
 
 __all__ = [

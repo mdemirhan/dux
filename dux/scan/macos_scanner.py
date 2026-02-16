@@ -9,12 +9,12 @@ from dux.scan._base import ThreadedScannerBase
 from dux.services.tree import LEAF_CHILDREN
 
 
-class BulkScanner(ThreadedScannerBase):
+class MacOSScanner(ThreadedScannerBase):
     """Threaded scanner using macOS getattrlistbulk (single syscall per dir batch)."""
 
     def __init__(self, workers: int = 8) -> None:
         if sys.platform != "darwin":
-            msg = "BulkScanner requires macOS"
+            msg = "MacOSScanner requires macOS"
             raise RuntimeError(msg)
         super().__init__(workers=workers)
 
