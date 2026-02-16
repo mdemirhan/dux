@@ -168,12 +168,12 @@ Each pattern rule:
 
 ## Performance
 
-Benchmarked on a 2024 MacBook Pro (M4 Pro):
+Benchmarked on a MacBook Pro M4:
 
-| Directory | Files | Dirs | Time |
-|-----------|-------|------|------|
-| ~/src | 295k | 38k | ~3s |
-| ~ | 2.1M | 323k | ~22s |
+| Files | Dirs | Time  |
+|-------|------|-------|
+| 295k | 38k | ~1.4s |
+| 2.1M | 323k | ~20s  |
 
 The scanner is I/O-bound. dux ships three scanner backends and automatically selects the best one for your platform:
 
