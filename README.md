@@ -218,15 +218,15 @@ The scanner is I/O-bound. dux ships three scanner backends and automatically sel
 
 | Scanner | Platform | Mechanism |
 |---------|----------|-----------|
-| **MacOSScanner** | macOS (default) | C extension using `getattrlistbulk` — fetches all entries + stat data in a single syscall per batch |
-| **PosixScanner** | Linux (GIL enabled) | C extension using `readdir` + `lstat` — releases the GIL during I/O for better thread utilization |
+| **NativeScanner** (macos) | macOS (default) | C extension using `getattrlistbulk` — fetches all entries + stat data in a single syscall per batch |
+| **NativeScanner** (posix) | Linux (GIL enabled) | C extension using `readdir` + `lstat` — releases the GIL during I/O for better thread utilization |
 | **PythonScanner** | Fallback / GIL disabled | Pure Python via `os.scandir` — also used for testing via the `FileSystem` abstraction |
 
 Override with `--scanner posix|macos|python`.
 
 ### Free-Threaded Python
 
-dux supports free-threaded Python (3.13t+). Both C extensions (`_walker`, `_matcher`) declare `Py_MOD_GIL_NOT_USED`, enabling true parallel execution without GIL contention. Use `--verbose` to see GIL status and active scanner at runtime.
+dux supports free-threaded Python (3.13t+). All three C extensions (`_walker`, `_ac_matcher`, `_prefix_trie`) declare `Py_MOD_GIL_NOT_USED`, enabling true parallel execution without GIL contention. Use `--verbose` to see GIL status and active scanner at runtime.
 
 When the GIL is disabled, `default_scanner()` selects `PythonScanner` — the C `readdir` wrapper's overhead becomes negligible compared to the parallelism gains from true multi-threading, and the pure Python scanner has the advantage of working through the `FileSystem` abstraction layer.
 
@@ -234,12 +234,14 @@ When the GIL is disabled, `default_scanner()` selects `PythonScanner` — the C 
 
 Pattern matching (insight generation) is the second-hottest path after scanning. dux avoids naive fnmatch-per-rule by classifying all 59 rules at compile time into fast string operations:
 
-- **EXACT** — `dict` lookup on lowercased basename (`O(1)`)
-- **CONTAINS + ENDSWITH** — Aho-Corasick automaton (C extension) for multi-pattern search in a single pass over the path. ENDSWITH suffixes are added as end-only keys, matched only when they occur at the end of the path
-- **STARTSWITH** — `str.startswith` on the basename
+- **EXACT** — `dict` lookup on lowercased basename — `O(1)`
+- **CONTAINS + ENDSWITH** — Aho-Corasick automaton (C extension) for multi-pattern search in a single pass over the path — `O(path_length)`. ENDSWITH suffixes are added as end-only keys, matched only when they occur at the end of the path
+- **STARTSWITH** — PrefixTrie (C extension) walks the basename once, collecting all matching prefixes — `O(basename_length)` regardless of pattern count
 - **GLOB** — fallback to `fnmatch` only for patterns that can't be decomposed
 
 Brace expansion (`{a,b}`) is resolved at compile time. All matcher values are lowercased once at build time; paths are lowercased once per node for case-insensitive matching.
+
+See `docs/aho-corasick.md` and `docs/prefix-trie.md` for detailed algorithm explanations, and `docs/architecture.md` for the full end-to-end pipeline.
 
 ## Development
 

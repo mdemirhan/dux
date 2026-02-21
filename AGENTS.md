@@ -18,14 +18,22 @@ Instructions for AI agents working on this codebase.
 ```
 csrc/
 ├── walker.c                    # C source: scan_dir_nodes (readdir), scan_dir_bulk_nodes (getattrlistbulk)
-└── matcher.c                   # C source: Aho-Corasick automaton (trie + fail links + BFS)
+├── ac_matcher.c                # C source: Aho-Corasick automaton (trie + fail links + BFS)
+└── prefix_trie.c               # C source: Prefix trie for O(basename) startswith matching
+
+docs/
+├── architecture.md             # End-to-end scan pipeline documentation
+├── aho-corasick.md             # Aho-Corasick algorithm deep dive
+└── prefix-trie.md              # PrefixTrie algorithm deep dive
 
 dux/
-├── _matcher.so / .pyi      # Compiled C extension: Aho-Corasick multi-pattern matcher
+├── _ac_matcher.so / .pyi   # Compiled C extension: Aho-Corasick multi-pattern matcher
+├── _prefix_trie.so / .pyi  # Compiled C extension: PrefixTrie startswith matcher
 ├── _walker.so / .pyi       # Compiled C extension: scan_dir_nodes (POSIX), scan_dir_bulk_nodes (macOS)
 ├── cli/app.py              # Entry point, CLI flags, progress display
 ├── ui/
 │   ├── app.py              # TUI application (Textual), all views and keybindings
+│   ├── views.py            # View generators: overview_rows, browse_rows, insight_rows, top_nodes_rows
 │   └── app.tcss            # Textual CSS styling (Tomorrow Night theme)
 ├── models/
 │   ├── enums.py            # NodeKind (FILE/DIRECTORY), InsightCategory (TEMP/CACHE/BUILD_ARTIFACT)
@@ -39,21 +47,20 @@ dux/
 │   ├── __init__.py          # Scanner protocol, default_scanner() (GIL-aware selection)
 │   ├── _base.py             # ThreadedScannerBase (thread pool + work queue)
 │   ├── python_scanner.py    # Pure Python scanner using FileSystem.scandir()
-│   ├── posix_scanner.py     # C extension scanner using _walker.scan_dir_nodes (readdir)
-│   └── macos_scanner.py     # C extension scanner using _walker.scan_dir_bulk_nodes (getattrlistbulk)
+│   └── native_scanner.py    # C extension scanner wrapping scan_dir_nodes / scan_dir_bulk_nodes
 └── services/
     ├── fs.py               # FileSystem protocol, OsFileSystem, DEFAULT_FS singleton
-    ├── insights.py          # Pattern matching, per-category min-heaps for top-K
-    ├── patterns.py          # Compiled matchers: EXACT, CONTAINS+ENDSWITH (Aho-Corasick), STARTSWITH, GLOB
+    ├── insights.py          # Insight generation: DFS traversal, per-category min-heaps for top-K
+    ├── patterns.py          # Compiled matchers: EXACT, CONTAINS+ENDSWITH (AC), STARTSWITH (PrefixTrie), GLOB
     ├── tree.py              # Tree traversal: iter_nodes, top_nodes (heapq.nlargest), finalize_sizes
-    ├── formatting.py        # format_bytes, relative_bar
+    ├── formatting.py        # format_bytes, relative_bar, relative_path
     └── summary.py           # Non-interactive CLI summary rendering
 ```
 
 ### Data Flow
 
 1. `cli/app.py` parses CLI args, loads config via `loader.py`, selects scanner via `default_scanner()`
-2. The selected scanner (`PythonScanner`, `PosixScanner`, or `MacOSScanner`) walks the filesystem in parallel, builds `ScanSnapshot` (immutable tree of `ScanNode`)
+2. The selected scanner (`PythonScanner` or `NativeScanner`) walks the filesystem in parallel, builds `ScanSnapshot` (immutable tree of `ScanNode`)
 3. `insights.py` walks the scan tree, matches against compiled patterns, produces `InsightBundle`
 4. Either `summary.py` renders CLI output, or `ui/app.py` launches the interactive TUI
 
@@ -61,9 +68,9 @@ dux/
 
 - **`ScanSnapshot` is immutable after scanning.** The scan tree never changes. All TUI views are read-only projections. Row caches are safe to keep across tab switches.
 - **`Result[T, E]` for error handling.** Scanner and config loader return `Result` types. CLI/TUI boundary code unwraps them.
-- **`FileSystem` protocol for testability.** `PythonScanner` and config loader accept a `fs` parameter (defaults to `DEFAULT_FS` singleton). Tests use `MemoryFileSystem` — no temp files, no disk I/O. Note: `PosixScanner` and `MacOSScanner` bypass `FileSystem` entirely, calling C extensions directly.
+- **`FileSystem` protocol for testability.** `PythonScanner` and config loader accept a `fs` parameter (defaults to `DEFAULT_FS` singleton). Tests use `MemoryFileSystem` — no temp files, no disk I/O. Note: `NativeScanner` bypasses `FileSystem` entirely, calling C extensions directly.
 - **`DirEntry.stat` is bundled, not separate.** `OsFileSystem.scandir` calls `entry.stat(follow_symlinks=False)` on the `os.DirEntry` object (which uses OS-cached stat data) and bundles the result into each `DirEntry`. The scanner reads `entry.stat` directly — never calls `fs.stat()` per entry in the hot loop.
-- **GIL-aware scanner selection.** `default_scanner()` picks the best backend: `MacOSScanner` on macOS (uses `getattrlistbulk` — single syscall per directory batch), `PosixScanner` when GIL is enabled (C `readdir`, benefits from GIL release during I/O), `PythonScanner` when GIL is disabled (true parallelism makes C overhead negligible).
+- **GIL-aware scanner selection.** `default_scanner()` picks the best backend: `NativeScanner(scan_dir_bulk_nodes)` on macOS (uses `getattrlistbulk` — single syscall per directory batch), `NativeScanner(scan_dir_nodes)` when GIL is enabled (C `readdir`, benefits from GIL release during I/O), `PythonScanner` when GIL is disabled (true parallelism makes C overhead negligible).
 
 ## Performance-Critical Code
 
@@ -106,13 +113,13 @@ Three scanner implementations share `ThreadedScannerBase` (thread pool + `_WorkQ
 
 | Scanner | When selected | How it works |
 |---------|---------------|--------------|
-| `MacOSScanner` | macOS (default) | Calls `_walker.scan_dir_bulk_nodes` — `getattrlistbulk` fetches all entries + stat in one syscall per batch. Fastest on macOS (fewer syscalls than readdir+lstat). |
-| `PosixScanner` | Linux with GIL enabled | Calls `_walker.scan_dir_nodes` — C `readdir` + `lstat` with GIL released during I/O. Benefits from GIL release allowing other threads to run during I/O waits. |
+| `NativeScanner(scan_dir_bulk_nodes)` | macOS (default) | `getattrlistbulk` fetches all entries + stat in one syscall per batch. Fastest on macOS (fewer syscalls than readdir+lstat). |
+| `NativeScanner(scan_dir_nodes)` | Linux with GIL enabled | C `readdir` + `lstat` with GIL released during I/O. Benefits from GIL release allowing other threads to run during I/O waits. |
 | `PythonScanner` | Fallback / GIL disabled | Uses `self._fs.scandir()` (pure Python). Only scanner that works with the `FileSystem` abstraction (and thus `MemoryFileSystem` for testing). Selected when GIL is disabled because true parallelism makes the C overhead negligible. |
 
 **`_WorkQueue`** uses a `deque` + single `Condition` + counter-based completion (`_outstanding` + `_done` Event). This is lighter than `queue.Queue` (which uses 3 internal locks). Workers batch-flush local stat counters to reduce lock contention.
 
-**Important:** `PosixScanner` and `MacOSScanner` bypass `self._fs` entirely — they call C extensions directly. Only `PythonScanner` goes through the `FileSystem` protocol. Scanner tests that need the `MemoryFileSystem` must use `PythonScanner`.
+**Important:** `NativeScanner` bypasses `self._fs` entirely — it calls C extensions directly. Only `PythonScanner` goes through the `FileSystem` protocol. Scanner tests that need the `MemoryFileSystem` must use `PythonScanner`.
 
 ### Pattern Matching Optimizations (`services/patterns.py`)
 
@@ -125,7 +132,7 @@ Pattern matching runs once per node during insight generation — millions of ca
 | `**/name` | `EXACT` | `dict.get(basename)` — O(1) |
 | `**/segment/**` | `CONTAINS` | Aho-Corasick automaton scan |
 | `**/*.ext` | `ENDSWITH` | Aho-Corasick automaton (end-only key) |
-| `**/prefix*` | `STARTSWITH` | `basename.startswith(prefix)` |
+| `**/prefix*` | `STARTSWITH` | PrefixTrie walk — O(basename length) |
 | Everything else | `GLOB` | `fnmatch` fallback |
 
 Only patterns that truly need globbing fall through to `fnmatch`. In practice, very few rules hit the GLOB path.
